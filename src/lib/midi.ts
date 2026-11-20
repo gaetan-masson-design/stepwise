@@ -1,4 +1,5 @@
-import { chordMidi, melodyMidi } from "./theory";
+import { melodyMidi } from "./theory";
+import { arrangeChords } from "./arrange";
 import type { Song } from "./song";
 
 const PPQ = 480;
@@ -45,13 +46,9 @@ export function songToMidi(song: Song): Uint8Array {
     { tick: 0, order: 0, data: [0xff, 0x51, 0x03, (usPerBeat >> 16) & 0xff, (usPerBeat >> 8) & 0xff, usPerBeat & 0xff] },
     { tick: 0, order: 0, data: [0xff, 0x58, 0x04, song.beatsPerBar, 2, 24, 8] },
   ];
-  const chords: Ev[] = [];
-  const bass: Ev[] = [];
-  for (const c of song.chords) {
-    const { notes, bass: b } = chordMidi(c, song.key, song.mode);
-    notes.forEach((n) => chords.push(...noteEvents(0, n, c.start, c.dur, 80)));
-    bass.push(...noteEvents(1, b, c.start, c.dur, 90));
-  }
+  const arranged = arrangeChords(song);
+  const chords = arranged.pad.flatMap((h) => h.notes.flatMap((n) => noteEvents(0, n, h.start, h.dur, 80)));
+  const bass = arranged.bass.flatMap((h) => noteEvents(1, h.notes[0], h.start, h.dur, 90));
   const melody = song.notes.flatMap((n) =>
     noteEvents(2, melodyMidi(n.step, n.acc, song.key, song.mode), n.start, n.dur, 100),
   );

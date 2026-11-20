@@ -48,3 +48,11 @@ describe("songToMidi", () => {
     expect(count).toBe(4);
   });
 });
+
+describe("normalizeSong playback settings", () => {
+  it("falls back to defaults for unknown styles and bad mix levels", () => {
+    const s = normalizeSong({ ...blankSong(), style: "toString", mix: { chords: "loud", bass: 3, melody: -1 } } as never);
+    expect(s.style).toBe("block");
+    expect(s.mix).toEqual({ chords: 0.8, bass: 1, melody: 0 });
+  });
+});

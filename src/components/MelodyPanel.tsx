@@ -20,7 +20,7 @@ export function MelodyPanel({ song, noteDur, chord, note, onNoteDur, onAccidenta
   let status: ReactNode;
   if (chord) {
     const a = analyzeChord(chord, song.key, song.mode);
-    status = <>Chord <b>{a.numeral}{a.sup}</b> · <b>{a.name}</b> · {chord.dur} beats · bar {Math.floor(chord.start / song.beatsPerBar) + 1}</>;
+    status = <>Chord <b>{a.numeral}{a.sup}{a.target}</b> · <b>{a.name}</b> · {chord.dur} beats · bar {Math.floor(chord.start / song.beatsPerBar) + 1}</>;
   } else if (note) {
     const pc = mod(stepToSemitone(MODES[song.mode], note.step) + note.acc + song.key, 12);
     const acc = note.acc < 0 ? "♭" : note.acc > 0 ? "♯" : "";

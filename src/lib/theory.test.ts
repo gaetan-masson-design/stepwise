@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { analyzeChord, chordMidi, melodyMidi } from "./theory";
+import { analyzeChord, canTonicize, chordMidi, melodyMidi } from "./theory";
 
-const chord = (degree: number, extra: Partial<{ type: "triad" | "seventh" | "sus4" | "add9"; inv: number; borrowed: boolean }> = {}) =>
+const chord = (degree: number, extra: Partial<{ type: "triad" | "seventh" | "sus4" | "add9"; inv: number; borrowed: boolean; applied: number }> = {}) =>
   ({ degree, type: "triad" as const, inv: 0, borrowed: false, ...extra });
 
 describe("analyzeChord", () => {
@@ -52,5 +52,27 @@ describe("pitches", () => {
     expect(melodyMidi(7, 0, 0, "major")).toBe(72);
     expect(melodyMidi(-1, 0, 0, "major")).toBe(59);
     expect(melodyMidi(2, -1, 0, "major")).toBe(63);
+  });
+});
+
+describe("applied chords", () => {
+  const fmt = (c: Parameters<typeof analyzeChord>[0], key = 0, mode: "major" | "minor" = "major") => {
+    const a = analyzeChord(c, key, mode);
+    return `${a.numeral}${a.sup}${a.target} ${a.name}`;
+  };
+  it("builds secondary dominants and leading-tone chords", () => {
+    expect(fmt({ ...chord(5), applied: 5 })).toBe("V/V D");
+    expect(fmt({ ...chord(5, { type: "seventh" }), applied: 2 })).toBe("V7/ii A7");
+    expect(fmt({ ...chord(7, { type: "seventh" }), applied: 6 })).toBe("vii°7/vi A♭dim7");
+    expect(fmt({ ...chord(5, { type: "seventh" }), applied: 4 })).toBe("V7/IV C7");
+  });
+  it("keeps applied chords in the normal register", () => {
+    const { notes } = chordMidi({ ...chord(7), applied: 6 }, 0, "major");
+    expect(Math.min(...notes)).toBeLessThan(60);
+    expect(Math.min(...notes)).toBeGreaterThanOrEqual(48);
+  });
+  it("only tonicizes major and minor triads", () => {
+    expect([2, 3, 4, 5, 6, 7].map((t) => canTonicize(t, "major"))).toEqual([true, true, true, true, true, false]);
+    expect(canTonicize(2, "minor")).toBe(false);
   });
 });

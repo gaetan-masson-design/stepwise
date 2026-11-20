@@ -6,10 +6,12 @@ interface Props {
   song: Song;
   playing: boolean;
   canUndo: boolean;
+  canRedo: boolean;
   onPlay: () => void;
   onUpdate: (patch: Partial<Song>, record?: boolean) => void;
   onBars: (bars: number) => void;
   onUndo: () => void;
+  onRedo: () => void;
   onExample: () => void;
   onClear: () => void;
   onExportMidi: () => void;
@@ -64,6 +66,7 @@ export function Transport(p: Props) {
       </div>
       <div className="sep" />
       <button className="btn" onClick={p.onUndo} disabled={!p.canUndo}>Undo</button>
+      <button className="btn" onClick={p.onRedo} disabled={!p.canRedo}>Redo</button>
       <button className="btn" onClick={p.onExample}>Example</button>
       <button className="btn" onClick={p.onClear}>Clear</button>
       <div className="sep" />
