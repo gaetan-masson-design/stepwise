@@ -21,6 +21,10 @@ export function ChordPalette({ song, brush, cursor, onPlace, onBrush }: Props) {
   const prev = song.chords.filter((c) => c.start < cursor).at(-1);
   // An applied chord wants to resolve to its target.
   const likely = !prev || brush.applied ? [] : prev.applied ? [prev.applied] : prev.borrowed ? [] : LIKELY_NEXT[prev.degree];
+  // A chord resized by dragging can have a length the presets don't offer; show it.
+  const durOpts = DUR_OPTS.some(([d]) => d === brush.dur)
+    ? DUR_OPTS
+    : [...DUR_OPTS, [brush.dur, `${brush.dur} beats`] as const].sort((x, y) => x[0] - y[0]);
   const appliedOpts = [[0, "Off"] as const, ...[2, 3, 4, 5, 6, 7].map((t) =>
     [t, "/" + analyzeChord({ degree: t, type: "triad", inv: 0, borrowed: brush.borrowed }, song.key, song.mode).numeral] as const)];
 
@@ -51,7 +55,7 @@ export function ChordPalette({ song, brush, cursor, onPlace, onBrush }: Props) {
       <div className="mods">
         <Segmented label="Type" options={TYPE_OPTS} value={brush.type} onChange={(type) => onBrush({ type })} />
         <Segmented label="Inversion" options={INV_OPTS.slice(0, maxInversion(brush.type) + 1)} value={brush.inv} onChange={(inv) => onBrush({ inv })} />
-        <Segmented label="Length" options={DUR_OPTS} value={brush.dur} onChange={(dur) => onBrush({ dur })} />
+        <Segmented label="Length" options={durOpts} value={brush.dur} onChange={(dur) => onBrush({ dur })} />
         <Segmented
           label="Applied" options={appliedOpts} value={brush.applied}
           isDisabled={(t) => t !== 0 && !canTonicize(t, song.mode, brush.borrowed)}

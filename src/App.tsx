@@ -99,7 +99,11 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).matches("input, select, textarea")) return;
       const run = (a: Action) => { e.preventDefault(); dispatch(a); };
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") return run({ type: "undo" });
+      const mod = e.metaKey || e.ctrlKey;
+      const k = e.key.toLowerCase();
+      if (mod && k === "z") return run({ type: e.shiftKey ? "redo" : "undo" });
+      if (mod && k === "y") return run({ type: "redo" });
+      if (mod && k === "d") return run({ type: "duplicate" });
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === " ") { e.preventDefault(); void togglePlay(); return; }
       if (/^[1-7]$/.test(e.key)) { e.preventDefault(); placeChord(Number(e.key)); return; }
@@ -133,7 +137,7 @@ export default function App() {
           onChange={(e) => dispatch({ type: "updateSong", patch: { title: e.target.value }, record: false })}
         />
         <div className="hint">
-          <kbd>1</kbd>–<kbd>7</kbd> add chord · <kbd>Space</kbd> play · click the grid to add notes · <kbd>Del</kbd> remove
+          <kbd>1</kbd>–<kbd>7</kbd> add chord · <kbd>Space</kbd> play · click the grid to add notes · drag to move, drag the edge to resize · <kbd>⌘D</kbd> duplicate
         </div>
       </header>
 
@@ -141,10 +145,12 @@ export default function App() {
         song={song}
         playing={playing}
         canUndo={state.past.length > 0}
+        canRedo={state.future.length > 0}
         onPlay={() => void togglePlay()}
         onUpdate={(patch, record) => dispatch({ type: "updateSong", patch, record })}
         onBars={(bars) => dispatch({ type: "setBars", bars })}
         onUndo={() => dispatch({ type: "undo" })}
+        onRedo={() => dispatch({ type: "redo" })}
         onExample={() => replaceSong({ ...exampleSong(), ...playback })}
         onClear={() => replaceSong(blankSong({ key: song.key, mode: song.mode, bpm: song.bpm, ...playback }))}
         onExportMidi={() => exportMidi(song)}
@@ -185,7 +191,8 @@ export default function App() {
         onDelete={() => dispatch({ type: "deleteSelected" })}
         onSetCursor={(beat) => dispatch({ type: "setCursor", beat })}
         onSetPlayhead={(beat) => void setPlayhead(beat)}
-        onPreviewStep={(s) => void engine.previewNote(melodyMidi(s, 0, song.key, song.mode))}
+        onPreviewStep={(s) => previewStep(s)}
+        onEdit={(kind, id, start, dur, step) => dispatch({ type: "editItem", kind, id, start, dur, step })}
       />
 
       <div className="dock">

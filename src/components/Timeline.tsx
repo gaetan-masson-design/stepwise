@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, type PointerEvent } from "react";
-import { BOTTOM_STEP, TOP_STEP, totalBeats, type Song } from "../lib/song";
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import { BOTTOM_STEP, clearRange, TOP_STEP, totalBeats, type Song } from "../lib/song";
 import { analyzeChord, keyOffset, mod, MODES, NOTE_NAMES, stepToSemitone } from "../lib/theory";
 import { degreeColor } from "../lib/colors";
 import { engine } from "../lib/audio";
 import { RomanNumeral } from "./RomanNumeral";
-import type { Selection } from "../state";
+import { MIN_DUR, type Selection } from "../state";
 
 const ROW_H = 20;
 const ROWS = TOP_STEP - BOTTOM_STEP + 1;
@@ -23,6 +23,20 @@ interface Props {
   onSetCursor: (beat: number) => void;
   onSetPlayhead: (beat: number) => void;
   onPreviewStep: (step: number) => void;
+  onEdit: (kind: "chord" | "note", id: string, start: number, dur: number, step?: number) => void;
+}
+
+interface Drag {
+  kind: "chord" | "note";
+  id: string;
+  resize: boolean;
+  pointer: number;
+  x0: number;
+  y0: number;
+  orig: { start: number; dur: number; step: number };
+  start: number;
+  dur: number;
+  step: number;
 }
 
 export function Timeline(p: Props) {
@@ -64,6 +78,55 @@ export function Timeline(p: Props) {
 
   const localX = (e: PointerEvent) => e.clientX - e.currentTarget.getBoundingClientRect().left;
 
+  // Dragging an item moves it; dragging its right-edge grip resizes it. Snaps to half beats.
+  const [drag, setDrag] = useState<Drag | null>(null);
+  const dragHandlers = (kind: "chord" | "note", item: { id: string; start: number; dur: number; step?: number }) => ({
+    onPointerDown: (e: PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0 || drag) return; // one drag at a time (ignore a second finger)
+      p.onSelect(kind, item.id);
+      e.currentTarget.setPointerCapture(e.pointerId);
+      const orig = { start: item.start, dur: item.dur, step: item.step ?? 0 };
+      setDrag({ kind, id: item.id, resize: !!(e.target as HTMLElement).closest(".grip"), pointer: e.pointerId, x0: e.clientX, y0: e.clientY, orig, ...orig });
+    },
+    onPointerMove: (e: PointerEvent<HTMLDivElement>) => {
+      if (!drag || drag.pointer !== e.pointerId) return;
+      const dBeat = Math.round(((e.clientX - drag.x0) / BW) * 2) / 2;
+      const { orig } = drag;
+      if (drag.resize) {
+        const dur = Math.max(MIN_DUR, Math.min(T - orig.start, orig.dur + dBeat));
+        if (dur !== drag.dur) setDrag({ ...drag, dur });
+        return;
+      }
+      const start = Math.max(0, Math.min(T - orig.dur, orig.start + dBeat));
+      const step = kind === "note"
+        ? Math.max(BOTTOM_STEP, Math.min(TOP_STEP, orig.step - Math.round((e.clientY - drag.y0) / ROW_H)))
+        : 0;
+      if (start === drag.start && step === drag.step) return;
+      if (step !== drag.step) p.onPreviewStep(step);
+      setDrag({ ...drag, start, step });
+    },
+    onPointerUp: (e: PointerEvent<HTMLDivElement>) => {
+      if (!drag || drag.pointer !== e.pointerId) return;
+      const { orig, start, dur, step } = drag;
+      setDrag(null);
+      if (start !== orig.start || dur !== orig.dur || step !== orig.step)
+        p.onEdit(drag.kind, drag.id, start, dur, drag.kind === "note" ? step : undefined);
+    },
+    onPointerCancel: () => setDrag(null),
+    onLostPointerCapture: () => setDrag(null),
+  });
+  // The dragged item can vanish mid-drag (Delete, undo); its pointerup never arrives then.
+  useEffect(() => {
+    if (drag && !(drag.kind === "note" ? song.notes : song.chords).some((x) => x.id === drag.id)) setDrag(null);
+  }, [drag, song.notes, song.chords]);
+  // While dragging, show the result the drop will have, including trimmed neighbours.
+  const shown = <X extends { id: string; start: number; dur: number }>(items: X[], kind: "chord" | "note"): X[] => {
+    if (!drag || drag.kind !== kind) return items;
+    const { start, dur } = drag;
+    return clearRange(items, start, start + dur, drag.id)
+      .map((x) => (x.id === drag.id ? { ...x, start, dur, ...(kind === "note" ? { step: drag.step } : {}) } : x));
+  };
+
   return (
     <div className="stage">
       <div className="labels">
@@ -102,42 +165,44 @@ export function Timeline(p: Props) {
             {STEPS.filter((s) => mod(s, 7) === 0).map((s) => (
               <div key={s} className="tonicrow" style={{ top: (TOP_STEP - s) * ROW_H, height: ROW_H }} />
             ))}
-            {song.chords.flatMap((c) => {
+            {shown(song.chords, "chord").flatMap((c) => {
               const a = analyses.get(c.id)!;
               return STEPS.filter((s) => a.pitchClasses.has(mod(stepToSemitone(scale, s), 12))).map((s) => (
                 <div key={`${c.id}:${s}`} className="band" style={{ left: c.start * BW + 1, width: c.dur * BW - 2, top: (TOP_STEP - s) * ROW_H + 1, height: ROW_H - 2, background: degreeColor(c.degree) }} />
               ));
             })}
-            {song.notes.map((n) => {
+            {shown(song.notes, "note").map((n) => {
               const d = mod(n.step, 7) + 1;
               return (
                 <div
                   key={n.id}
-                  className={`note${p.sel?.id === n.id ? " sel" : ""}`}
+                  className={`note${p.sel?.id === n.id ? " sel" : ""}${drag?.id === n.id ? " dragging" : ""}`}
                   style={{ left: n.start * BW + 1, width: n.dur * BW - 2, top: (TOP_STEP - n.step) * ROW_H + 1, height: ROW_H - 2, background: degreeColor(d) }}
-                  onPointerDown={() => p.onSelect("note", n.id)}
+                  {...dragHandlers("note", n)}
                   onDoubleClick={p.onDelete}
                 >
                   {n.acc < 0 ? "♭" : n.acc > 0 ? "♯" : ""}{d}
+                  <span className="grip" aria-hidden />
                 </div>
               );
             })}
           </div>
 
           <div className="lane" onPointerDown={(e) => { if (!(e.target as HTMLElement).closest(".chord")) p.onSetCursor(Math.floor(localX(e) / BW + 0.5)); }}>
-            {song.chords.map((c) => {
+            {shown(song.chords, "chord").map((c) => {
               const a = analyses.get(c.id)!;
               return (
                 <div
                   key={c.id}
-                  className={`chord${c.borrowed ? " borrowed" : ""}${c.applied ? " applied" : ""}${p.sel?.id === c.id ? " sel" : ""}`}
+                  className={`chord${c.borrowed ? " borrowed" : ""}${c.applied ? " applied" : ""}${p.sel?.id === c.id ? " sel" : ""}${drag?.id === c.id ? " dragging" : ""}`}
                   style={{ left: c.start * BW + 2, width: c.dur * BW - 4, backgroundColor: degreeColor(c.degree) }}
                   title={a.name}
-                  onPointerDown={() => p.onSelect("chord", c.id)}
+                  {...dragHandlers("chord", c)}
                   onDoubleClick={p.onDelete}
                 >
                   <RomanNumeral a={a} />
                   <span className="cn">{a.name}</span>
+                  <span className="grip" aria-hidden />
                 </div>
               );
             })}

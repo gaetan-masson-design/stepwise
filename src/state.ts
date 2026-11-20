@@ -17,6 +17,7 @@ export type Selection = { kind: "chord" | "note"; id: string } | null;
 export interface EditorState {
   song: Song;
   past: Song[];
+  future: Song[];
   sel: Selection;
   /** Where the next chord goes, in beats. */
   cursor: number;
@@ -41,7 +42,10 @@ export type Action =
   | { type: "updateSong"; patch: Partial<Song>; record?: boolean }
   | { type: "replaceSong"; song: Song }
   | { type: "setPlayhead"; beat: number }
-  | { type: "undo" };
+  | { type: "editItem"; kind: "chord" | "note"; id: string; start: number; dur: number; step?: number }
+  | { type: "duplicate" }
+  | { type: "undo" }
+  | { type: "redo" };
 
 const HISTORY = 100;
 
@@ -49,6 +53,7 @@ export function initState(song: Song): EditorState {
   return {
     song,
     past: [],
+    future: [],
     sel: null,
     cursor: totalBeats(song),
     brush: { type: "triad", inv: 0, borrowed: false, applied: 0, dur: 4 },
@@ -59,12 +64,25 @@ export function initState(song: Song): EditorState {
 
 /** Applies a song change and records the old song for undo. */
 function commit(s: EditorState, song: Song, extra: Partial<EditorState> = {}): EditorState {
-  return { ...s, ...extra, song, past: [...s.past.slice(-(HISTORY - 1)), s.song] };
+  return { ...s, ...extra, song, past: [...s.past.slice(-(HISTORY - 1)), s.song], future: [] };
 }
+
+/**
+ * Playback settings (loop, click, style, mixer) are edited without undo history,
+ * so undo/redo keep the current ones instead of restoring a snapshot's.
+ */
+const withSettings = (target: Song, from: Song): Song =>
+  ({ ...target, loop: from.loop, metronome: from.metronome, style: from.style, mix: from.mix });
 
 /** Drops an applied target that the mode (or Borrowed) no longer allows. */
 const validBrush = (b: Brush, mode: Mode): Brush =>
   b.applied && !canTonicize(b.applied, mode, b.borrowed) ? { ...b, applied: 0 } : b;
+
+/** Room left before the song end at `bars`, so new items never run past it. */
+const fit = (song: Song, bars: number, start: number, dur: number) => Math.min(dur, bars * song.beatsPerBar - start);
+
+/** Smallest length a dragged item can have, in beats. */
+export const MIN_DUR = 0.5;
 
 export const selectedChord = (s: EditorState): Chord | undefined =>
   s.sel?.kind === "chord" ? s.song.chords.find((c) => c.id === s.sel!.id) : undefined;
@@ -76,15 +94,16 @@ export function reducer(s: EditorState, a: Action): EditorState {
   switch (a.type) {
     case "placeChord": {
       const { type, inv, borrowed, applied, dur } = s.brush;
-      const c: Chord = { id: newId(), start: s.cursor, dur, degree: a.degree, type, inv, borrowed, applied };
-      const bars = barsToFit(song, c.start + c.dur);
-      if (c.start >= bars * song.beatsPerBar) return s; // song is at max length
+      const bars = barsToFit(song, s.cursor + dur);
+      if (s.cursor >= bars * song.beatsPerBar) return s; // song is at max length
+      const c: Chord = { id: newId(), start: s.cursor, dur: fit(song, bars, s.cursor, dur), degree: a.degree, type, inv, borrowed, applied };
       const chords = [...clearRange(song.chords, c.start, c.start + c.dur), c].sort(byStart);
       return commit(s, { ...song, bars, chords }, { sel: { kind: "chord", id: c.id }, cursor: c.start + c.dur });
     }
     case "placeNote": {
-      const n: Note = { id: newId(), start: a.start, dur: s.noteDur, step: a.step, acc: 0 };
-      const bars = barsToFit(song, n.start + n.dur);
+      const bars = barsToFit(song, a.start + s.noteDur);
+      if (a.start >= bars * song.beatsPerBar) return s;
+      const n: Note = { id: newId(), start: a.start, dur: fit(song, bars, a.start, s.noteDur), step: a.step, acc: 0 };
       const notes = [...clearRange(song.notes, n.start, n.start + n.dur), n].sort(byStart);
       return commit(s, { ...song, bars, notes }, { sel: { kind: "note", id: n.id } });
     }
@@ -159,10 +178,49 @@ export function reducer(s: EditorState, a: Action): EditorState {
       return commit(s, a.song, { sel: null, cursor: totalBeats(a.song), playhead: 0, brush: validBrush(s.brush, a.song.mode) });
     case "setPlayhead":
       return { ...s, playhead: a.beat };
+    case "editItem": {
+      const T = totalBeats(song);
+      const start = Math.max(0, Math.min(T - MIN_DUR, a.start));
+      const dur = Math.max(MIN_DUR, Math.min(T - start, a.dur));
+      if (a.kind === "chord") {
+        const c = song.chords.find((x) => x.id === a.id);
+        if (!c || (c.start === start && c.dur === dur)) return s;
+        const updated = { ...c, start, dur };
+        const chords = clearRange(song.chords, start, start + dur, c.id).map((x) => (x.id === c.id ? updated : x)).sort(byStart);
+        return commit(s, { ...song, chords }, { sel: { kind: "chord", id: c.id }, brush: { ...s.brush, dur }, cursor: start + dur });
+      }
+      const n = song.notes.find((x) => x.id === a.id);
+      if (!n) return s;
+      const step = Math.max(BOTTOM_STEP, Math.min(TOP_STEP, a.step ?? n.step));
+      if (n.start === start && n.dur === dur && n.step === step) return s;
+      const updated = { ...n, start, dur, step };
+      const notes = clearRange(song.notes, start, start + dur, n.id).map((x) => (x.id === n.id ? updated : x)).sort(byStart);
+      return commit(s, { ...song, notes }, { sel: { kind: "note", id: n.id }, noteDur: dur });
+    }
+    case "duplicate": {
+      const item = selectedChord(s) ?? selectedNote(s);
+      if (!item) return s;
+      const start = item.start + item.dur;
+      const bars = barsToFit(song, start + item.dur);
+      if (start >= bars * song.beatsPerBar) return s;
+      const dur = fit(song, bars, start, item.dur);
+      const copy = { ...item, id: newId(), start, dur };
+      if (s.sel!.kind === "chord") {
+        const chords = [...clearRange(song.chords, start, start + dur), copy as Chord].sort(byStart);
+        return commit(s, { ...song, bars, chords }, { sel: { kind: "chord", id: copy.id }, cursor: start + dur });
+      }
+      const notes = [...clearRange(song.notes, start, start + dur), copy as Note].sort(byStart);
+      return commit(s, { ...song, bars, notes }, { sel: { kind: "note", id: copy.id } });
+    }
     case "undo": {
       if (!s.past.length) return s;
-      const prev = s.past[s.past.length - 1];
-      return { ...s, song: prev, past: s.past.slice(0, -1), sel: null, cursor: Math.min(s.cursor, totalBeats(prev)) };
+      const prev = withSettings(s.past[s.past.length - 1], song);
+      return { ...s, song: prev, brush: validBrush(s.brush, prev.mode), past: s.past.slice(0, -1), future: [s.song, ...s.future], sel: null, cursor: Math.min(s.cursor, totalBeats(prev)) };
+    }
+    case "redo": {
+      if (!s.future.length) return s;
+      const next = withSettings(s.future[0], song);
+      return { ...s, song: next, brush: validBrush(s.brush, next.mode), past: [...s.past.slice(-(HISTORY - 1)), s.song], future: s.future.slice(1), sel: null, cursor: Math.min(s.cursor, totalBeats(next)) };
     }
   }
 }

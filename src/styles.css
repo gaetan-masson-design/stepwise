@@ -120,6 +120,13 @@ select,.num{border:1px solid var(--line);background:var(--panel-2);border-radius
 .chord.applied.borrowed,.pbtn.applied.borrowed{background-image:radial-gradient(rgba(255,255,255,.4) 1.4px,transparent 1.6px),repeating-linear-gradient(135deg,rgba(255,255,255,.22) 0 6px,transparent 6px 12px);background-size:7px 7px,auto}
 .rn .tgt{font-size:.62em;font-weight:700;opacity:.8}
 
+/* Drag to move; the right-edge grip resizes */
+.note,.chord{touch-action:none;user-select:none;-webkit-user-select:none}
+.grip{position:absolute;top:0;right:0;bottom:0;width:8px;cursor:ew-resize}
+.grip::after{content:"";position:absolute;top:25%;bottom:25%;right:2px;width:2px;border-radius:1px;background:currentColor;opacity:0;transition:opacity .1s}
+.note:hover .grip::after,.chord:hover .grip::after,.sel .grip::after{opacity:.45}
+.dragging{opacity:.85;z-index:4;cursor:grabbing}
+
 /* Right column of the dock: melody + sound cards */
 .side{display:flex;flex-direction:column;gap:12px;min-width:0}
 .mixer{display:flex;flex-direction:column;gap:6px}
