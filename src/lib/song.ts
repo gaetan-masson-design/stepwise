@@ -1,4 +1,5 @@
 import type { ChordType, Mode } from "./theory";
+import { DEFAULT_MIX, STYLE_LABEL, type Mix, type PlayStyle } from "./arrange";
 
 export interface Chord {
   id: string;
@@ -29,9 +30,15 @@ export interface Song {
   bars: number;
   loop: boolean;
   metronome: boolean;
+  /** How the chord track is played back and exported. */
+  style: PlayStyle;
+  mix: Mix;
   chords: Chord[];
   notes: Note[];
 }
+
+/** What playback and export depend on (not the title or mixer). */
+export type Arrangement = Pick<Song, "chords" | "notes" | "bpm" | "key" | "mode" | "bars" | "beatsPerBar" | "loop" | "metronome" | "style">;
 
 /** Melody grid range, in diatonic steps from the tonic. */
 export const TOP_STEP = 14;
@@ -41,7 +48,7 @@ export const MAX_BARS = 64;
 let counter = 0;
 export const newId = () => `${Date.now().toString(36)}-${(counter++).toString(36)}`;
 
-export const totalBeats = (s: Song) => s.bars * s.beatsPerBar;
+export const totalBeats = (s: Pick<Song, "bars" | "beatsPerBar">) => s.bars * s.beatsPerBar;
 
 export function blankSong(from?: Partial<Song>): Song {
   return {
@@ -53,6 +60,8 @@ export function blankSong(from?: Partial<Song>): Song {
     bars: 8,
     loop: true,
     metronome: false,
+    style: "block",
+    mix: { ...DEFAULT_MIX },
     chords: [],
     notes: [],
     ...from,
@@ -115,6 +124,11 @@ export function isSong(v: unknown): v is Song {
   return !!s && typeof s === "object" && Array.isArray(s.chords) && Array.isArray(s.notes) && typeof s.bpm === "number";
 }
 
+function normalizeMix(m: Partial<Mix> | undefined): Mix {
+  const level = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : d);
+  return { chords: level(m?.chords, DEFAULT_MIX.chords), bass: level(m?.bass, DEFAULT_MIX.bass), melody: level(m?.melody, DEFAULT_MIX.melody) };
+}
+
 /** Adds ids to songs saved without them (e.g. the first prototype). */
 export function normalizeSong(s: Song): Song {
   return {
@@ -122,6 +136,8 @@ export function normalizeSong(s: Song): Song {
     ...s,
     beatsPerBar: s.beatsPerBar ?? (s as unknown as { bpb?: number }).bpb ?? 4,
     metronome: s.metronome ?? (s as unknown as { metro?: boolean }).metro ?? false,
+    style: typeof s.style === "string" && Object.hasOwn(STYLE_LABEL, s.style) ? s.style : "block",
+    mix: normalizeMix(s.mix),
     chords: s.chords.map((c) => ({ ...c, id: c.id ?? newId(), applied: c.applied ?? 0 })),
     notes: s.notes.map((n) => ({ ...n, id: n.id ?? newId() })),
   };

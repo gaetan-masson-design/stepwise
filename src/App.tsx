@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 import { engine } from "./lib/audio";
 import { exampleSong, blankSong, totalBeats } from "./lib/song";
 import { degreeColor } from "./lib/colors";
@@ -9,6 +9,7 @@ import { Transport } from "./components/Transport";
 import { Timeline } from "./components/Timeline";
 import { ChordPalette } from "./components/ChordPalette";
 import { MelodyPanel } from "./components/MelodyPanel";
+import { SoundPanel } from "./components/SoundPanel";
 
 const beatWidthFor = (w: number) => (w < 560 ? 40 : 52);
 
@@ -19,6 +20,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const { song } = state;
   const chord = selectedChord(state);
+  // Playback settings survive Clear and Example (undo doesn't restore them).
+  const playback = { loop: song.loop, metronome: song.metronome, style: song.style, mix: song.mix };
   const note = selectedNote(state);
 
   // Autosave.
@@ -27,10 +30,18 @@ export default function App() {
     return () => clearTimeout(t);
   }, [song]);
 
-  // Edits during playback are heard on the next pass.
+  useEffect(() => engine.setMix(song.mix), [song.mix]);
+
+  // Edits during playback are heard on the next pass. Only fields that change what's
+  // scheduled trigger a reload; title edits and mixer moves don't.
+  const { chords, notes, bpm, key, mode, bars, beatsPerBar, loop, metronome, style } = song;
+  const scheduled = useMemo(
+    () => ({ chords, notes, bpm, key, mode, bars, beatsPerBar, loop, metronome, style }),
+    [chords, notes, bpm, key, mode, bars, beatsPerBar, loop, metronome, style],
+  );
   useEffect(() => {
-    if (playing) engine.load(song);
-  }, [song, playing]);
+    if (playing) engine.load(scheduled);
+  }, [scheduled, playing]);
 
   useEffect(() => {
     engine.onEnd = () => {
@@ -134,8 +145,8 @@ export default function App() {
         onUpdate={(patch, record) => dispatch({ type: "updateSong", patch, record })}
         onBars={(bars) => dispatch({ type: "setBars", bars })}
         onUndo={() => dispatch({ type: "undo" })}
-        onExample={() => replaceSong(exampleSong())}
-        onClear={() => replaceSong(blankSong({ key: song.key, mode: song.mode, bpm: song.bpm }))}
+        onExample={() => replaceSong({ ...exampleSong(), ...playback })}
+        onClear={() => replaceSong(blankSong({ key: song.key, mode: song.mode, bpm: song.bpm, ...playback }))}
         onExportMidi={() => exportMidi(song)}
         onExportJson={() => exportJson(song)}
         onImport={async (f) => {
@@ -179,6 +190,7 @@ export default function App() {
 
       <div className="dock">
         <ChordPalette song={song} brush={state.brush} cursor={state.cursor} onPlace={placeChord} onBrush={setBrush} />
+        <div className="side">
         <MelodyPanel
           song={song}
           noteDur={state.noteDur}
@@ -191,6 +203,8 @@ export default function App() {
           }}
           onDelete={() => dispatch({ type: "deleteSelected" })}
         />
+        <SoundPanel song={song} onUpdate={(patch, record) => dispatch({ type: "updateSong", patch, record })} />
+        </div>
       </div>
     </div>
   );

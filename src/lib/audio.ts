@@ -1,11 +1,15 @@
 import * as Tone from "tone";
 import { chordMidi, melodyMidi, midiToFreq, type ChordSpec, type Mode } from "./theory";
-import { totalBeats, type Song } from "./song";
+import { totalBeats, type Arrangement } from "./song";
+import { arrangeChords, DEFAULT_MIX, type Mix } from "./arrange";
 
 type PartEvent =
-  | { kind: "chord"; time: string; notes: number[]; bass: number; durTicks: number }
-  | { kind: "note"; time: string; midi: number; durTicks: number }
+  | { kind: "pad" | "bass" | "note"; time: string; notes: number[]; durTicks: number }
   | { kind: "click"; time: string; accent: boolean };
+
+/** Base levels in dB; the mixer scales these. */
+const LEVELS = { pad: -20, bass: -8, lead: -16 };
+const toDb = (gain: number) => (gain <= 0 ? -Infinity : 20 * Math.log10(gain));
 
 /**
  * Wraps Tone.js: three instruments plus the Transport, which keeps musical time.
@@ -20,6 +24,14 @@ class Engine {
   private click!: Tone.Synth;
   private part: Tone.Part<PartEvent> | null = null;
   private endEvent: number | null = null;
+  private mix: Mix = DEFAULT_MIX;
+  private lastPreview = 0;
+
+  /** Mono synths reject two starts at the same instant (e.g. fast drags), so space previews apart. */
+  private previewTime() {
+    this.lastPreview = Math.max(Tone.now(), this.lastPreview + 0.01);
+    return this.lastPreview;
+  }
   onEnd: (() => void) | null = null;
 
   private get transport() {
@@ -38,20 +50,20 @@ class Engine {
     this.pad = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: "fatsawtooth", count: 2, spread: 16 },
       envelope: { attack: 0.02, decay: 0.4, sustain: 0.6, release: 0.35 },
-      volume: -20,
+      volume: LEVELS.pad,
     }).connect(padFilter);
     this.bass = new Tone.MonoSynth({
       oscillator: { type: "triangle" },
       filter: { Q: 1, type: "lowpass" },
       filterEnvelope: { attack: 0.01, decay: 0.2, sustain: 0.4, baseFrequency: 200, octaves: 2 },
       envelope: { attack: 0.01, decay: 0.3, sustain: 0.7, release: 0.2 },
-      volume: -8,
+      volume: LEVELS.bass,
     }).connect(out);
     const leadFilter = new Tone.Filter(2600, "lowpass").connect(out);
     this.lead = new Tone.Synth({
       oscillator: { type: "square" },
       envelope: { attack: 0.01, decay: 0.15, sustain: 0.6, release: 0.12 },
-      volume: -16,
+      volume: LEVELS.lead,
     }).connect(leadFilter);
     this.click = new Tone.Synth({
       oscillator: { type: "sine" },
@@ -59,6 +71,16 @@ class Engine {
       volume: -8,
     }).connect(out);
     this.ready = true;
+    this.setMix(this.mix);
+  }
+
+  /** Sets track levels (0..1). Can be called before audio starts. */
+  setMix(mix: Mix) {
+    this.mix = mix;
+    if (!this.ready) return;
+    this.pad.volume.value = LEVELS.pad + toDb(mix.chords);
+    this.bass.volume.value = LEVELS.bass + toDb(mix.bass);
+    this.lead.volume.value = LEVELS.lead + toDb(mix.melody);
   }
 
   private ticks(beats: number) {
@@ -66,7 +88,7 @@ class Engine {
   }
 
   /** Rebuilds the scheduled events from the song. Safe to call while playing. */
-  load(song: Song) {
+  load(song: Arrangement) {
     if (!this.ready) return;
     const t = this.transport;
     t.bpm.value = song.bpm;
@@ -74,18 +96,12 @@ class Engine {
     const end = this.ticks(totalBeats(song));
 
     const events: PartEvent[] = [];
-    for (const c of song.chords) {
-      const { notes, bass } = chordMidi(c, song.key, song.mode);
-      events.push({ kind: "chord", time: `${this.ticks(c.start)}i`, notes, bass, durTicks: this.ticks(c.dur) });
-    }
-    for (const n of song.notes) {
-      events.push({
-        kind: "note",
-        time: `${this.ticks(n.start)}i`,
-        midi: melodyMidi(n.step, n.acc, song.key, song.mode),
-        durTicks: this.ticks(n.dur),
-      });
-    }
+    const { pad, bass } = arrangeChords(song);
+    const add = (kind: "pad" | "bass" | "note", start: number, dur: number, notes: number[]) =>
+      events.push({ kind, time: `${this.ticks(start)}i`, notes, durTicks: this.ticks(dur) });
+    pad.forEach((h) => add("pad", h.start, h.dur, h.notes));
+    bass.forEach((h) => add("bass", h.start, h.dur, h.notes));
+    song.notes.forEach((n) => add("note", n.start, n.dur, [melodyMidi(n.step, n.acc, song.key, song.mode)]));
     if (song.metronome) {
       for (let b = 0; b < totalBeats(song); b++)
         events.push({ kind: "click", time: `${this.ticks(b)}i`, accent: b % song.beatsPerBar === 0 });
@@ -106,18 +122,18 @@ class Engine {
 
   private trigger(ev: PartEvent, time: number) {
     const secs = (ticks: number) => Tone.Ticks(ticks).toSeconds();
-    if (ev.kind === "chord") {
-      const d = secs(ev.durTicks);
-      this.pad.triggerAttackRelease(ev.notes.map(midiToFreq), d, time);
-      this.bass.triggerAttackRelease(midiToFreq(ev.bass), d * 0.95, time);
+    if (ev.kind === "pad") {
+      this.pad.triggerAttackRelease(ev.notes.map(midiToFreq), secs(ev.durTicks), time);
+    } else if (ev.kind === "bass") {
+      this.bass.triggerAttackRelease(midiToFreq(ev.notes[0]), secs(ev.durTicks) * 0.95, time);
     } else if (ev.kind === "note") {
-      this.lead.triggerAttackRelease(midiToFreq(ev.midi), secs(ev.durTicks) * 0.92, time);
-    } else {
+      this.lead.triggerAttackRelease(midiToFreq(ev.notes[0]), secs(ev.durTicks) * 0.92, time);
+    } else if (ev.kind === "click") {
       this.click.triggerAttackRelease(ev.accent ? 1760 : 1100, 0.04, time);
     }
   }
 
-  async play(song: Song, fromBeat: number) {
+  async play(song: Arrangement, fromBeat: number) {
     await this.init();
     this.load(song);
     const start = fromBeat >= totalBeats(song) ? 0 : fromBeat;
@@ -144,13 +160,14 @@ class Engine {
   async previewChord(c: ChordSpec, key: number, mode: Mode) {
     await this.init();
     const { notes, bass } = chordMidi(c, key, mode);
-    this.pad.triggerAttackRelease(notes.map(midiToFreq), 0.9);
-    this.bass.triggerAttackRelease(midiToFreq(bass), 0.9);
+    const t = this.previewTime();
+    this.pad.triggerAttackRelease(notes.map(midiToFreq), 0.9, t);
+    this.bass.triggerAttackRelease(midiToFreq(bass), 0.9, t);
   }
 
   async previewNote(midi: number) {
     await this.init();
-    this.lead.triggerAttackRelease(midiToFreq(midi), 0.35);
+    this.lead.triggerAttackRelease(midiToFreq(midi), 0.35, this.previewTime());
   }
 }
 
