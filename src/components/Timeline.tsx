@@ -130,7 +130,7 @@ export function Timeline(p: Props) {
               return (
                 <div
                   key={c.id}
-                  className={`chord${c.borrowed ? " borrowed" : ""}${p.sel?.id === c.id ? " sel" : ""}`}
+                  className={`chord${c.borrowed ? " borrowed" : ""}${c.applied ? " applied" : ""}${p.sel?.id === c.id ? " sel" : ""}`}
                   style={{ left: c.start * BW + 2, width: c.dur * BW - 4, backgroundColor: degreeColor(c.degree) }}
                   title={a.name}
                   onPointerDown={() => p.onSelect("chord", c.id)}

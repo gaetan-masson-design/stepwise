@@ -1,4 +1,4 @@
-import { analyzeChord, CHORD_TYPE_LABEL, CHORD_TYPES, LIKELY_NEXT, maxInversion, MODE_LABEL, NOTE_NAMES, PARALLEL, type ChordType } from "../lib/theory";
+import { analyzeChord, canTonicize, CHORD_TYPE_LABEL, CHORD_TYPES, LIKELY_NEXT, maxInversion, MODE_LABEL, NOTE_NAMES, PARALLEL, type ChordType } from "../lib/theory";
 import { degreeColor } from "../lib/colors";
 import type { Song } from "../lib/song";
 import type { Brush } from "../state";
@@ -19,7 +19,10 @@ const DUR_OPTS = [[1, "1 beat"], [2, "2 beats"], [4, "4 beats"], [8, "2 bars"]] 
 
 export function ChordPalette({ song, brush, cursor, onPlace, onBrush }: Props) {
   const prev = song.chords.filter((c) => c.start < cursor).at(-1);
-  const likely = prev && !prev.borrowed ? LIKELY_NEXT[prev.degree] : [];
+  // An applied chord wants to resolve to its target.
+  const likely = !prev || brush.applied ? [] : prev.applied ? [prev.applied] : prev.borrowed ? [] : LIKELY_NEXT[prev.degree];
+  const appliedOpts = [[0, "Off"] as const, ...[2, 3, 4, 5, 6, 7].map((t) =>
+    [t, "/" + analyzeChord({ degree: t, type: "triad", inv: 0, borrowed: brush.borrowed }, song.key, song.mode).numeral] as const)];
 
   return (
     <section className="card">
@@ -33,7 +36,7 @@ export function ChordPalette({ song, brush, cursor, onPlace, onBrush }: Props) {
           return (
             <button
               key={d}
-              className={`pbtn${brush.borrowed ? " borrowed" : ""}${likely.includes(d) ? " next" : ""}`}
+              className={`pbtn${brush.borrowed ? " borrowed" : ""}${brush.applied ? " applied" : ""}${likely.includes(d) ? " next" : ""}`}
               style={{ backgroundColor: degreeColor(d) }}
               aria-label={`Add ${a.name}`}
               onClick={() => onPlace(d)}
@@ -49,6 +52,11 @@ export function ChordPalette({ song, brush, cursor, onPlace, onBrush }: Props) {
         <Segmented label="Type" options={TYPE_OPTS} value={brush.type} onChange={(type) => onBrush({ type })} />
         <Segmented label="Inversion" options={INV_OPTS.slice(0, maxInversion(brush.type) + 1)} value={brush.inv} onChange={(inv) => onBrush({ inv })} />
         <Segmented label="Length" options={DUR_OPTS} value={brush.dur} onChange={(dur) => onBrush({ dur })} />
+        <Segmented
+          label="Applied" options={appliedOpts} value={brush.applied}
+          isDisabled={(t) => t !== 0 && !canTonicize(t, song.mode, brush.borrowed)}
+          onChange={(applied) => onBrush({ applied })}
+        />
         <button className="btn" aria-pressed={brush.borrowed} title="Take chords from the parallel key" onClick={() => onBrush({ borrowed: !brush.borrowed })}>
           Borrowed
         </button>

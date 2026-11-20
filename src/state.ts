@@ -2,12 +2,13 @@ import {
   barsToFit, BOTTOM_STEP, byStart, clearRange, newId, resizeSong, TOP_STEP, totalBeats,
   type Chord, type Note, type Song,
 } from "./lib/song";
-import { maxInversion, type ChordType } from "./lib/theory";
+import { canTonicize, maxInversion, type ChordType, type Mode } from "./lib/theory";
 
 export interface Brush {
   type: ChordType;
   inv: number;
   borrowed: boolean;
+  applied: number;
   dur: number;
 }
 
@@ -50,7 +51,7 @@ export function initState(song: Song): EditorState {
     past: [],
     sel: null,
     cursor: totalBeats(song),
-    brush: { type: "triad", inv: 0, borrowed: false, dur: 4 },
+    brush: { type: "triad", inv: 0, borrowed: false, applied: 0, dur: 4 },
     noteDur: 1,
     playhead: 0,
   };
@@ -61,6 +62,10 @@ function commit(s: EditorState, song: Song, extra: Partial<EditorState> = {}): E
   return { ...s, ...extra, song, past: [...s.past.slice(-(HISTORY - 1)), s.song] };
 }
 
+/** Drops an applied target that the mode (or Borrowed) no longer allows. */
+const validBrush = (b: Brush, mode: Mode): Brush =>
+  b.applied && !canTonicize(b.applied, mode, b.borrowed) ? { ...b, applied: 0 } : b;
+
 export const selectedChord = (s: EditorState): Chord | undefined =>
   s.sel?.kind === "chord" ? s.song.chords.find((c) => c.id === s.sel!.id) : undefined;
 export const selectedNote = (s: EditorState): Note | undefined =>
@@ -70,8 +75,8 @@ export function reducer(s: EditorState, a: Action): EditorState {
   const { song } = s;
   switch (a.type) {
     case "placeChord": {
-      const { type, inv, borrowed, dur } = s.brush;
-      const c: Chord = { id: newId(), start: s.cursor, dur, degree: a.degree, type, inv, borrowed };
+      const { type, inv, borrowed, applied, dur } = s.brush;
+      const c: Chord = { id: newId(), start: s.cursor, dur, degree: a.degree, type, inv, borrowed, applied };
       const bars = barsToFit(song, c.start + c.dur);
       if (c.start >= bars * song.beatsPerBar) return s; // song is at max length
       const chords = [...clearRange(song.chords, c.start, c.start + c.dur), c].sort(byStart);
@@ -88,7 +93,7 @@ export function reducer(s: EditorState, a: Action): EditorState {
         const c = song.chords.find((x) => x.id === a.id);
         if (!c) return s;
         return { ...s, sel: { kind: "chord", id: c.id }, cursor: c.start,
-          brush: { type: c.type, inv: c.inv, borrowed: c.borrowed, dur: c.dur } };
+          brush: validBrush({ type: c.type, inv: c.inv, borrowed: c.borrowed, applied: c.applied, dur: c.dur }, song.mode) };
       }
       const n = song.notes.find((x) => x.id === a.id);
       if (!n) return s;
@@ -105,11 +110,11 @@ export function reducer(s: EditorState, a: Action): EditorState {
       return commit(s, next, { sel: null, cursor: c ? c.start : s.cursor });
     }
     case "setBrush": {
-      const brush = { ...s.brush, ...a.patch };
+      const brush = validBrush({ ...s.brush, ...a.patch }, song.mode);
       brush.inv = Math.min(brush.inv, maxInversion(brush.type));
       const c = selectedChord(s);
       if (!c) return { ...s, brush };
-      const updated: Chord = { ...c, type: brush.type, inv: brush.inv, borrowed: brush.borrowed, dur: brush.dur };
+      const updated: Chord = { ...c, type: brush.type, inv: brush.inv, borrowed: brush.borrowed, applied: brush.applied, dur: brush.dur };
       const bars = barsToFit(song, updated.start + updated.dur);
       const chords = clearRange(song.chords, updated.start, updated.start + updated.dur, c.id)
         .map((x) => (x.id === c.id ? updated : x));
@@ -145,10 +150,13 @@ export function reducer(s: EditorState, a: Action): EditorState {
       const end = totalBeats(next);
       return commit(s, next, { sel: null, cursor: Math.min(s.cursor, end), playhead: s.playhead >= end ? 0 : s.playhead });
     }
-    case "updateSong":
-      return a.record === false ? { ...s, song: { ...song, ...a.patch } } : commit(s, { ...song, ...a.patch });
+    case "updateSong": {
+      const next = { ...song, ...a.patch };
+      const brush = validBrush(s.brush, next.mode);
+      return a.record === false ? { ...s, song: next, brush } : commit(s, next, { brush });
+    }
     case "replaceSong":
-      return commit(s, a.song, { sel: null, cursor: totalBeats(a.song), playhead: 0 });
+      return commit(s, a.song, { sel: null, cursor: totalBeats(a.song), playhead: 0, brush: validBrush(s.brush, a.song.mode) });
     case "setPlayhead":
       return { ...s, playhead: a.beat };
     case "undo": {

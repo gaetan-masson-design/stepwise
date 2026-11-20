@@ -8,6 +8,8 @@ export interface Chord {
   type: ChordType;
   inv: number;
   borrowed: boolean;
+  /** Degree this chord tonicizes (V/x), or 0. */
+  applied: number;
 }
 
 export interface Note {
@@ -70,7 +72,7 @@ export function exampleSong(): Song {
   ];
   return blankSong({
     title: "Lantern song (example)",
-    chords: chords.map(([degree, type, inv], i) => ({ id: newId(), start: i * 4, dur: 4, degree, type, inv, borrowed: false })),
+    chords: chords.map(([degree, type, inv], i) => ({ id: newId(), start: i * 4, dur: 4, degree, type, inv, borrowed: false, applied: 0 })),
     notes: notes.map(([start, dur, step]) => ({ id: newId(), start, dur, step, acc: 0 })),
   });
 }
@@ -120,7 +122,7 @@ export function normalizeSong(s: Song): Song {
     ...s,
     beatsPerBar: s.beatsPerBar ?? (s as unknown as { bpb?: number }).bpb ?? 4,
     metronome: s.metronome ?? (s as unknown as { metro?: boolean }).metro ?? false,
-    chords: s.chords.map((c) => ({ ...c, id: c.id ?? newId() })),
+    chords: s.chords.map((c) => ({ ...c, id: c.id ?? newId(), applied: c.applied ?? 0 })),
     notes: s.notes.map((n) => ({ ...n, id: n.id ?? newId() })),
   };
 }

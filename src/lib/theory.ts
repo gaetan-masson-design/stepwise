@@ -73,6 +73,8 @@ export interface ChordSpec {
   type: ChordType;
   inv: number;
   borrowed: boolean;
+  /** Applied (secondary) chord: the degree it tonicizes, 2..7. 0 or missing = none. */
+  applied?: number;
 }
 
 export interface ChordAnalysis {
@@ -80,6 +82,8 @@ export interface ChordAnalysis {
   numeral: string;
   /** Superscript part, e.g. "°", "6/5", "Δ7", "sus4". */
   sup: string;
+  /** Applied target, e.g. "/V". Empty for ordinary chords. */
+  target: string;
   /** Lead-sheet name, e.g. "G7/B". */
   name: string;
   /** Voiced chord tones in semitones above the tonic, lowest first. */
@@ -88,21 +92,45 @@ export interface ChordAnalysis {
   pitchClasses: Set<number>;
 }
 
-export function analyzeChord(c: ChordSpec, key: number, mode: Mode): ChordAnalysis {
-  const scale = MODES[c.borrowed ? PARALLEL[mode] : mode];
-  const d = c.degree - 1;
+/** Harmonic minor: the local scale for chords applied to a minor target, so V/ii is major and vii°7/ii fully diminished. */
+const HARMONIC_MINOR = [0, 2, 3, 5, 7, 8, 11] as const;
+
+type Quality = "maj" | "min" | "dim" | "aug";
+
+function triadQuality(scale: readonly number[], d: number): Quality {
   const root = stepToSemitone(scale, d);
   const third = stepToSemitone(scale, d + 2) - root;
   const fifth = stepToSemitone(scale, d + 4) - root;
-  const seventh = stepToSemitone(scale, d + 6) - root;
-  const quality = third === 4 ? (fifth === 8 ? "aug" : "maj") : fifth === 6 ? "dim" : "min";
+  return third === 4 ? (fifth === 8 ? "aug" : "maj") : fifth === 6 ? "dim" : "min";
+}
 
-  const tones = CHORD_TYPES[c.type].map((s) => stepToSemitone(scale, d + s)).sort((a, b) => a - b);
+/** A degree can be tonicized when its triad is major or minor. */
+export function canTonicize(target: number, mode: Mode, borrowed = false) {
+  if (target < 2 || target > 7) return false;
+  const q = triadQuality(MODES[borrowed ? PARALLEL[mode] : mode], target - 1);
+  return q === "maj" || q === "min";
+}
+
+export function analyzeChord(c: ChordSpec, key: number, mode: Mode): ChordAnalysis {
+  const host = MODES[c.borrowed ? PARALLEL[mode] : mode];
+  const applied = c.applied && c.applied >= 2 && c.applied <= 7 ? c.applied : 0;
+  // For applied chords, build the chord in the target's own key, then shift it up to the target's root.
+  const scale: readonly number[] = applied ? (triadQuality(host, applied - 1) === "maj" ? MODES.major : HARMONIC_MINOR) : host;
+  const offset = applied ? stepToSemitone(host, applied - 1) : 0;
+  const d = c.degree - 1;
+  const local = stepToSemitone(scale, d);
+  const quality = triadQuality(scale, d);
+  const seventh = stepToSemitone(scale, d + 6) - local;
+  // Keep applied chords in the same register as the rest.
+  const shift = offset + local >= 12 ? offset - 12 : offset;
+  const root = local + shift;
+
+  const tones = CHORD_TYPES[c.type].map((s) => stepToSemitone(scale, d + s) + shift).sort((a, b) => a - b);
   const inv = Math.min(c.inv, maxInversion(c.type));
   const voiced = tones.slice();
   for (let i = 0; i < inv; i++) voiced.push(voiced.shift()! + 12);
 
-  const diff = mod(root - MODES[mode][d] + 6, 12) - 6;
+  const diff = applied ? 0 : mod(root - MODES[mode][d] + 6, 12) - 6;
   const accidental = diff < 0 ? "♭".repeat(-diff) : "♯".repeat(diff);
   const isSus = c.type === "sus2" || c.type === "sus4";
   const upper = quality === "maj" || quality === "aug" || isSus;
@@ -140,9 +168,14 @@ export function analyzeChord(c: ChordSpec, key: number, mode: Mode): ChordAnalys
   }
   if (inv > 0) name += "/" + NOTE_NAMES[mod(voiced[0] + key, 12)];
 
+  const target = applied
+    ? "/" + analyzeChord({ degree: applied, type: "triad", inv: 0, borrowed: c.borrowed }, key, mode).numeral
+    : "";
+
   return {
     numeral: accidental + base,
     sup,
+    target,
     name,
     voiced,
     pitchClasses: new Set(tones.map((t) => mod(t, 12))),
