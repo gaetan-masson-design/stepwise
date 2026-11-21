@@ -49,3 +49,7 @@ export const stepY = (step: number) => (TOP_STEP - step) / (TOP_STEP - BOTTOM_ST
 /** The first bar of the melody editor's window that shows `bar`, for windows of `size` bars. */
 export const windowStart = (bar: number, size: number, bars: number) =>
   Math.max(0, Math.min(Math.floor(bar / size) * size, Math.max(0, bars - size)));
+
+/** The window one page earlier (-1) or later (+1), staying on the same aligned windows both ways. */
+export const pageWindow = (start: number, dir: -1 | 1, size: number, bars: number) =>
+  windowStart(dir > 0 ? start + size : start - 1, size, bars);

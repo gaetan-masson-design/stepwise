@@ -17,6 +17,7 @@ import { LayerDock } from "./components/LayerDock";
 import { Notice } from "./components/Notice";
 import { windowStart, type Layer } from "./lib/lanes";
 import { useMediaQuery } from "./hooks/useMediaQuery";
+import { shortcutIgnored, spacePressesButton } from "./lib/shortcuts";
 
 const SILENT_HINT_KEY = "stepwise:silent-hint-dismissed";
 const hintDismissed = () => {
@@ -35,6 +36,7 @@ export default function App() {
   const [dockOpen, setDockOpen] = useState(true);
   // The melody editor: open or not, and the first bar it shows.
   const [editorBar, setEditorBar] = useState<number | null>(null);
+  const [zoom, setZoom] = useState(1);
   const editorBars = useMediaQuery("(min-width: 480px)") ? 2 : 1;
   const [songSheet, setSongSheet] = useState(false);
   const [theme, setTheme] = useState<ThemeChoice>(loadTheme);
@@ -153,8 +155,7 @@ export default function App() {
   // Keyboard shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.matches("input, select, textarea") || target.closest("[role=dialog], [role=menu], [role=listbox]")) return;
+      if (shortcutIgnored(e.target instanceof Element ? e.target : null, e.key, e.defaultPrevented)) return;
       const run = (a: Action) => { e.preventDefault(); dispatch(a); };
       const mod = e.metaKey || e.ctrlKey;
       const k = e.key.toLowerCase();
@@ -162,7 +163,15 @@ export default function App() {
       if (mod && k === "y") return run({ type: "redo" });
       if (mod && k === "d") return run({ type: "duplicate" });
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === " ") { e.preventDefault(); void togglePlay(); return; }
+      if (e.key === " ") {
+        e.preventDefault();
+        if (e.repeat) return; // holding Space shouldn't stutter play/stop
+        if (spacePressesButton(e.target instanceof Element ? e.target : null, e.key)) {
+          window.addEventListener("keyup", (up) => up.key === " " && up.preventDefault(), { once: true, capture: true });
+        }
+        void togglePlay();
+        return;
+      }
       if (/^[1-7]$/.test(e.key)) { e.preventDefault(); placeChord(Number(e.key)); return; }
       if (e.key === "Delete" || e.key === "Backspace") return run({ type: "deleteSelected" });
       if (e.key === "Escape") return run({ type: "deselect" });
@@ -226,6 +235,8 @@ export default function App() {
                 playhead={state.playhead}
                 playing={playing}
                 onLayer={setLayer}
+                zoom={zoom}
+                onZoom={setZoom}
                 onOpenMelody={openEditor}
                 onSelectChord={(id) => {
                   dispatch({ type: "select", kind: "chord", id });

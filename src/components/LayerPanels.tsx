@@ -1,9 +1,7 @@
-import { Play } from "lucide-react";
 import { STYLE_LABEL, type Mix, type PlayStyle } from "../lib/arrange";
 import type { Song } from "../lib/song";
 import { OptionGroup } from "./OptionGroup";
 import { Hint, LevelSlider, Panel } from "./Panel";
-import { Button } from "@/components/ui/button";
 
 interface Props {
   song: Song;
@@ -22,18 +20,14 @@ export const PadSound = (p: Props) => (
 );
 
 export function ArpPanel(p: Props) {
-  const hearing = p.song.style === "arpeggio";
   return (
     <Panel label="Arp">
       <Hint>
         The arp walks up and down the notes of each chord. The lane shows the pattern it starts from. Its own sound and
         patterns (up, down, up-down, random) arrive with the next update.
       </Hint>
-      <div>
-        <Button variant="outline" size="sm" aria-pressed={hearing} onClick={() => p.onUpdate({ style: hearing ? "block" : "arpeggio" }, false)}>
-          <Play /> {hearing ? "Hearing it on the pads" : "Hear it on the pads"}
-        </Button>
-      </div>
+      <Hint>To hear it today, have the pads play it: pick Arpeggio below (Block or Pulse goes back).</Hint>
+      <OptionGroup label="Pads play" options={STYLE_OPTS} value={p.song.style} onChange={(style) => p.onUpdate({ style }, false)} />
     </Panel>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fitBeatWidth, laneHits, nextZoom, pitchRange, pitchY, windowStart } from "./lanes";
+import { fitBeatWidth, laneHits, nextZoom, pageWindow, pitchRange, pitchY, windowStart } from "./lanes";
 import { blankSong, type Chord } from "./song";
 
 const chord = (start: number, degree: number): Chord =>
@@ -44,5 +44,18 @@ describe("melody editor window", () => {
     expect(windowStart(7, 2, 8)).toBe(6);
     expect(windowStart(4, 2, 5)).toBe(3);
     expect(windowStart(2, 1, 8)).toBe(2);
+  });
+});
+
+describe("paging the melody editor", () => {
+  it("visits the same windows forwards and backwards, even with an odd number of bars", () => {
+    const fwd = [0];
+    while (fwd.at(-1)! < 3) fwd.push(pageWindow(fwd.at(-1)!, 1, 2, 5));
+    expect(fwd).toEqual([0, 2, 3]);
+    const back = [3];
+    while (back.at(-1)! > 0) back.push(pageWindow(back.at(-1)!, -1, 2, 5));
+    expect(back).toEqual([3, 2, 0]);
+    expect(pageWindow(4, 1, 1, 8)).toBe(5);
+    expect(pageWindow(4, -1, 1, 8)).toBe(3);
   });
 });

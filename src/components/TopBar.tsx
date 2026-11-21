@@ -89,7 +89,8 @@ export function TopBar(p: Props) {
           onChange={(e) => setBpm(e.target.value)}
           onFocus={(e) => e.target.select()}
           onBlur={commitBpm}
-          onKeyDown={(e) => e.key === "Enter" && (e.currentTarget.blur(), commitBpm())}
+          // Blurring commits (onBlur), so Enter records one undo step, not two.
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
         />
       </label>
 

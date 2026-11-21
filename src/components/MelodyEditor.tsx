@@ -5,6 +5,7 @@ import { analyzeChord, mod, MODES, stepPitchName, stepToSemitone } from "../lib/
 import { degreeColor } from "../lib/colors";
 import { engine } from "../lib/audio";
 import { useItemDrag } from "@/hooks/useItemDrag";
+import { pageWindow } from "../lib/lanes";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Button } from "@/components/ui/button";
 import type { Selection } from "../state";
@@ -112,11 +113,11 @@ export function MelodyEditor(p: Props) {
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-lg border bg-surface">
       <div className="flex items-center gap-1 border-b bg-surface-2 px-1">
-        <Button variant="ghost" size="icon" aria-label="Earlier bars" disabled={startBar <= 0} onClick={() => p.onStartBar(Math.max(0, startBar - windowBars))}><ChevronLeft /></Button>
+        <Button variant="ghost" size="icon" aria-label="Earlier bars" disabled={startBar <= 0} onClick={() => p.onStartBar(pageWindow(startBar, -1, windowBars, song.bars))}><ChevronLeft /></Button>
         <span className="min-w-0 flex-1 truncate text-center text-sm font-semibold">
           Melody · {shownBars === 1 ? `bar ${startBar + 1}` : `bars ${startBar + 1}–${startBar + shownBars}`} <span className="font-normal text-muted-foreground">of {song.bars}</span>
         </span>
-        <Button variant="ghost" size="icon" aria-label="Later bars" disabled={startBar >= last} onClick={() => p.onStartBar(Math.min(last, startBar + windowBars))}><ChevronRight /></Button>
+        <Button variant="ghost" size="icon" aria-label="Later bars" disabled={startBar >= last} onClick={() => p.onStartBar(pageWindow(startBar, 1, windowBars, song.bars))}><ChevronRight /></Button>
         <Button variant="outline" size="sm" onClick={p.onClose}><X /> Done</Button>
       </div>
 
@@ -132,7 +133,7 @@ export function MelodyEditor(p: Props) {
                   className={cn("flex w-full items-center gap-1.5 border-b border-border-subtle px-1.5 font-mono text-xs select-none hover:bg-accent", d === 1 ? "font-semibold text-foreground" : "text-muted-foreground")}
                   style={{ height: RH }}
                   aria-label={`Hear ${stepPitchName(s, 0, song.key, song.mode)}`}
-                  onPointerDown={() => p.onPreviewStep(s)}
+                  onClick={() => p.onPreviewStep(s)}
                 >
                   <span className="grid size-5 shrink-0 place-items-center rounded-xs text-2xs font-semibold text-deg-ink" style={{ background: degreeColor(d) }}>{d}</span>
                   <span className="truncate">{stepPitchName(s, 0, song.key, song.mode)}</span>

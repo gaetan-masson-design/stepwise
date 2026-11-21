@@ -22,6 +22,9 @@ export const LAYER_ICON: Record<Layer, LucideIcon | typeof ChordsIcon> = {
   melody: Music2,
 };
 
+/** Tiles narrower than this (px) have no resize grip: three grip widths, so most of the tile still moves it. */
+const GRIP_MIN_TILE = 36;
+
 /** Lane heights (Tailwind classes, so they stay on the spacing scale). Every lane is at least 44px. */
 const LANE_H: Record<Layer, string> = {
   pads: "h-16",
@@ -44,6 +47,9 @@ interface Props {
   onSetCursor: (beat: number) => void;
   onSetPlayhead: (beat: number) => void;
   onEdit: (kind: "chord" | "note", id: string, start: number, dur: number) => void;
+  /** 1, 2 or 4. Kept by the parent so it survives opening the melody editor. */
+  zoom: number;
+  onZoom: (zoom: number) => void;
 }
 
 /**
@@ -56,7 +62,7 @@ export function LoopView(p: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
-  const [zoom, setZoom] = useState(1);
+  const { zoom } = p;
   const LW = labelWidth(width);
   // Floor to a hundredth of a pixel so rounding never makes the lanes a hair wider than the view.
   const BW = Math.floor(fitBeatWidth(width - LW, T, zoom) * 100) / 100;
@@ -119,9 +125,7 @@ export function LoopView(p: Props) {
   const lane = (layer: Layer, content: ReactNode, onClick: (e: MouseEvent<HTMLDivElement>) => void, label: string) => (
     <div
       key={layer}
-      role="button"
-      tabIndex={-1}
-      aria-label={label}
+      title={label}
       className={cn("relative cursor-pointer border-t grid-beats", LANE_H[layer], p.layer === layer && "bg-accent/60")}
       onClick={onClick}
     >
@@ -149,7 +153,7 @@ export function LoopView(p: Props) {
             type="button"
             className="flex h-touch items-center justify-center gap-1 text-xs font-semibold text-muted-foreground hover:bg-accent"
             aria-label={`Zoom: ${zoom}×. Tap to change.`}
-            onClick={() => setZoom(nextZoom(zoom))}
+            onClick={() => p.onZoom(nextZoom(zoom))}
           >
             <ZoomIn className="size-4" /> {zoom}×
           </button>
@@ -191,6 +195,7 @@ export function LoopView(p: Props) {
               {shown(song.chords, "chord").map((c) => {
                 const a = analyses.get(c.id)!;
                 const selected = p.sel?.id === c.id;
+                const w = Math.max(4, c.dur * BW - 2);
                 return (
                   <ChordTile
                     key={c.id}
@@ -202,7 +207,7 @@ export function LoopView(p: Props) {
                       selected && "z-3 outline-2 outline-offset-1 outline-foreground",
                       draggingId === c.id && "z-4 cursor-grabbing opacity-85",
                     )}
-                    style={{ left: c.start * BW + 1, width: Math.max(4, c.dur * BW - 2) }}
+                    style={{ left: c.start * BW + 1, width: w }}
                     title={a.name}
                     data-selected={selected || undefined}
                     {...handlers("chord", c)}
@@ -211,7 +216,8 @@ export function LoopView(p: Props) {
                   >
                     <RomanNumeral a={a} className={tiny ? "text-sm" : "text-lg"} />
                     {!tiny && <span className="truncate font-mono text-xs font-semibold opacity-85">{a.name}</span>}
-                    <span data-grip aria-hidden className="absolute inset-y-0 right-0 w-2 cursor-ew-resize pointer-coarse:w-3" />
+                    {/* Narrow tiles get no grip, so a drag always moves them; zoom in to resize. */}
+                    {w >= GRIP_MIN_TILE && <span data-grip aria-hidden className="absolute inset-y-0 right-0 w-2 cursor-ew-resize pointer-coarse:w-3" />}
                   </ChordTile>
                 );
               })}

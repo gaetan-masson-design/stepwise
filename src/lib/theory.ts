@@ -77,11 +77,26 @@ const LETTER_PC = [0, 2, 4, 5, 7, 9, 11];
 /** Accidental (in semitones, -2..2) that turns `letter` into pitch class `pc`. */
 const accidentalFor = (letter: number, pc: number) => mod(pc - LETTER_PC[mod(letter, 7)] + 6, 12) - 6;
 
-const accidentalText = (n: number) =>
-  n === 0 ? "" : n === 2 ? "𝄪" : n === -2 ? "𝄫" : n > 0 ? "♯".repeat(n) : "♭".repeat(-n);
+const accidentalText = (n: number) => (n > 0 ? "♯".repeat(n) : "♭".repeat(-n));
 
-/** Name of pitch class `pc` (absolute, C = 0) written on `letter`. */
-export const spell = (letter: number, pc: number) => LETTERS[mod(letter, 7)] + accidentalText(accidentalFor(letter, pc));
+/**
+ * The letter and accidental for pitch class `pc` written on `letter`. Double sharps and flats are
+ * hard to read, so those move to the neighbouring letter (B𝄫 becomes A, C𝄪 becomes D).
+ */
+function spelling(letter: number, pc: number) {
+  let acc = accidentalFor(letter, pc);
+  if (Math.abs(acc) > 1) {
+    letter += Math.sign(acc);
+    acc = accidentalFor(letter, pc);
+  }
+  return { letter, acc };
+}
+
+/** Name of pitch class `pc` (absolute, C = 0) written on `letter`, or its neighbour for doubles. */
+export const spell = (letter: number, pc: number) => {
+  const s = spelling(letter, pc);
+  return LETTERS[mod(s.letter, 7)] + accidentalText(s.acc);
+};
 
 /**
  * The letter of the tonic for a key (0..11, C = 0) in a mode: the spelling whose scale needs
@@ -113,9 +128,8 @@ export const stepName = (step: number, acc: number, key: number, mode: Mode) =>
 /** Scientific pitch name, e.g. "G♯4" or "C♭5": the octave follows the letter, not the key on a piano. */
 export function stepPitchName(step: number, acc: number, key: number, mode: Mode) {
   const midi = melodyMidi(step, acc, key, mode);
-  const letter = tonicLetter(key, mode) + step;
-  const natural = midi - accidentalFor(letter, midi);
-  return spell(letter, midi) + (Math.floor(natural / 12) - 1);
+  const sp = spelling(tonicLetter(key, mode) + step, midi);
+  return LETTERS[mod(sp.letter, 7)] + accidentalText(sp.acc) + (Math.floor((midi - sp.acc) / 12) - 1);
 }
 
 export const maxInversion = (type: ChordType) => (type === "seventh" ? 3 : 2);

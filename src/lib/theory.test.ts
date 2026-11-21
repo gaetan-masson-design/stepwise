@@ -86,7 +86,9 @@ describe("note spelling", () => {
     expect(spell(5, 8)).toBe("A♭");
     expect(spell(6, 0)).toBe("B♯");
     expect(spell(0, 11)).toBe("C♭");
-    expect(spell(3, 7)).toBe("F𝄪");
+    // Double sharps and flats move to the neighbouring letter.
+    expect(spell(3, 7)).toBe("G");
+    expect(spell(6, 9)).toBe("A");
   });
 
   it("names keys with the fewest accidentals for the mode", () => {
@@ -140,6 +142,24 @@ describe("note spelling", () => {
     // The major V in a minor key is E with G♯, in A minor.
     expect(name(chord(5, { borrowed: true }), 9, "minor")).toBe("E");
     expect(analyzeChord({ ...chord(5), applied: 6 }, 0, "major").noteNames).toEqual(["E", "G♯", "B"]);
+  });
+
+  it("never shows double sharps or flats in chord names", () => {
+    const modes = ["major", "minor", "dorian", "mixolydian", "lydian", "phrygian"] as const;
+    const doubles: string[] = [];
+    for (let key = 0; key < 12; key++)
+      for (const mode of modes)
+        for (let degree = 1; degree <= 7; degree++)
+          for (const borrowed of [false, true])
+            for (const applied of [0, 2, 3, 4, 5, 6, 7]) {
+              const a = analyzeChord({ degree, type: "seventh", inv: 1, borrowed, applied }, key, mode);
+              if (/[𝄪𝄫]|♯♯|♭♭/u.test(a.name + a.noteNames.join(""))) doubles.push(a.name);
+            }
+    expect(doubles).toEqual([]);
+    // ♭VI in D♭ major is A, not B𝄫; vii°7/ii in C♯ minor starts on D, not C𝄪.
+    expect(analyzeChord(chord(6, { borrowed: true }), 1, "major").name).toBe("A");
+    expect(analyzeChord({ ...chord(7, { type: "seventh" }), applied: 2 }, 1, "minor").name).toBe("Ddim7");
+    expect(stepPitchName(6, 1, 11, "major")).toBe("B4"); // A♯ raised in B major is A𝄪 → B
   });
 
   it("spells slash bass notes and chord tones", () => {

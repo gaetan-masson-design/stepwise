@@ -31,7 +31,7 @@ export function LayerDock(p: Props) {
           variant="ghost"
           className="min-w-0 flex-1 justify-start gap-2 px-2 text-base"
           aria-expanded={p.open}
-          aria-controls="layer-tools"
+          aria-controls={p.open ? "layer-tools" : undefined}
           onClick={() => p.onOpenChange(!p.open)}
         >
           <Icon className="size-4" />
