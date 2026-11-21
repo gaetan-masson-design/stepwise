@@ -1,7 +1,4 @@
 import { mod } from "./theory";
 
-/** One hue per scale degree; lightness and chroma come from theme tokens in styles.css. */
-const HUES = [160, 211, 262, 313, 4, 55, 106];
-
-export const degreeColor = (degree: number) =>
-  `oklch(var(--deg-l) var(--deg-c) ${HUES[mod(degree - 1, 7)]})`;
+/** The colour token for a scale degree (1..7), defined in styles.css as --deg-1…--deg-7. */
+export const degreeColor = (degree: number) => `var(--deg-${mod(degree - 1, 7) + 1})`;

@@ -74,6 +74,24 @@ class Engine {
     this.setMix(this.mix);
   }
 
+  /**
+   * Unlocks audio from inside a tap or key press (iOS and most browsers keep it silent until
+   * then). Resolves true once sound can play.
+   */
+  async unlock() {
+    try {
+      await this.init();
+    } catch {
+      return false;
+    }
+    return Tone.getContext().state === "running";
+  }
+
+  /** iOS suspends audio when the app goes to the background; wake it when it's back. */
+  resume() {
+    if (this.ready && Tone.getContext().state !== "running") void Tone.getContext().resume();
+  }
+
   /** Sets track levels (0..1). Can be called before audio starts. */
   setMix(mix: Mix) {
     this.mix = mix;

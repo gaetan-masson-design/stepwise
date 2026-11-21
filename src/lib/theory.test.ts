@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { analyzeChord, canTonicize, chordMidi, melodyMidi } from "./theory";
+import { analyzeChord, canTonicize, chordMidi, keyName, melodyMidi, spell, stepName, stepPitchName, tonicLetter } from "./theory";
 
-const chord = (degree: number, extra: Partial<{ type: "triad" | "seventh" | "sus4" | "add9"; inv: number; borrowed: boolean; applied: number }> = {}) =>
+const chord = (degree: number, extra: Partial<{ type: "triad" | "seventh" | "sus2" | "sus4" | "add9"; inv: number; borrowed: boolean; applied: number }> = {}) =>
   ({ degree, type: "triad" as const, inv: 0, borrowed: false, ...extra });
 
 describe("analyzeChord", () => {
@@ -63,7 +63,7 @@ describe("applied chords", () => {
   it("builds secondary dominants and leading-tone chords", () => {
     expect(fmt({ ...chord(5), applied: 5 })).toBe("V/V D");
     expect(fmt({ ...chord(5, { type: "seventh" }), applied: 2 })).toBe("V7/ii A7");
-    expect(fmt({ ...chord(7, { type: "seventh" }), applied: 6 })).toBe("vii°7/vi A♭dim7");
+    expect(fmt({ ...chord(7, { type: "seventh" }), applied: 6 })).toBe("vii°7/vi G♯dim7");
     expect(fmt({ ...chord(5, { type: "seventh" }), applied: 4 })).toBe("V7/IV C7");
   });
   it("keeps applied chords in the normal register", () => {
@@ -74,5 +74,101 @@ describe("applied chords", () => {
   it("only tonicizes major and minor triads", () => {
     expect([2, 3, 4, 5, 6, 7].map((t) => canTonicize(t, "major"))).toEqual([true, true, true, true, true, false]);
     expect(canTonicize(2, "minor")).toBe(false);
+  });
+});
+
+describe("note spelling", () => {
+  const names = (key: number, mode: Parameters<typeof keyName>[1]) =>
+    [0, 1, 2, 3, 4, 5, 6].map((s) => stepName(s, 0, key, mode)).join(" ");
+
+  it("spells a pitch on a given letter", () => {
+    expect(spell(4, 8)).toBe("G♯"); // G-letter, pitch class 8
+    expect(spell(5, 8)).toBe("A♭");
+    expect(spell(6, 0)).toBe("B♯");
+    expect(spell(0, 11)).toBe("C♭");
+    // Double sharps and flats move to the neighbouring letter.
+    expect(spell(3, 7)).toBe("G");
+    expect(spell(6, 9)).toBe("A");
+  });
+
+  it("names keys with the fewest accidentals for the mode", () => {
+    expect(keyName(1, "major")).toBe("D♭");
+    expect(keyName(1, "minor")).toBe("C♯");
+    expect(keyName(8, "major")).toBe("A♭");
+    expect(keyName(8, "minor")).toBe("G♯");
+    expect(keyName(6, "major")).toBe("F♯");
+    expect(keyName(3, "minor")).toBe("E♭");
+    expect(keyName(10, "minor")).toBe("B♭");
+    expect(keyName(1, "dorian")).toBe("C♯");
+    expect(tonicLetter(0, "major")).toBe(0);
+  });
+
+  it("gives every scale degree its own letter", () => {
+    expect(names(0, "major")).toBe("C D E F G A B");
+    expect(names(4, "major")).toBe("E F♯ G♯ A B C♯ D♯");
+    expect(names(1, "minor")).toBe("C♯ D♯ E F♯ G♯ A B");
+    expect(names(6, "major")).toBe("F♯ G♯ A♯ B C♯ D♯ E♯");
+    expect(names(5, "minor")).toBe("F G A♭ B♭ C D♭ E♭");
+    expect(names(2, "dorian")).toBe("D E F G A B C");
+    expect(names(4, "phrygian")).toBe("E F G A B C D");
+  });
+
+  it("spells altered melody notes on their degree's letter", () => {
+    expect(stepName(4, 1, 0, "major")).toBe("G♯");
+    expect(stepName(5, -1, 0, "major")).toBe("A♭");
+    expect(stepName(6, 1, 9, "minor")).toBe("G♯"); // raised 7th in A minor
+    expect(stepPitchName(0, 0, 0, "major")).toBe("C4");
+    expect(stepPitchName(-1, 0, 0, "major")).toBe("B3");
+    // B♯ sounds like C but is written in the octave below.
+    expect(stepPitchName(6, 1, 0, "major")).toBe("B♯4");
+  });
+
+  it("spells chords for the key and the chord", () => {
+    const name = (c: Parameters<typeof analyzeChord>[0], key: number, mode: Parameters<typeof keyName>[1]) => analyzeChord(c, key, mode).name;
+    // Applied chords use the target's letters.
+    expect(name({ ...chord(7, { type: "seventh" }), applied: 6 }, 0, "major")).toBe("G♯dim7");
+    expect(name({ ...chord(5), applied: 6 }, 0, "major")).toBe("E");
+    expect(name({ ...chord(5, { type: "seventh" }), applied: 2 }, 0, "major")).toBe("A7");
+    expect(name({ ...chord(5), applied: 5 }, 4, "major")).toBe("F♯");
+    // Sharp keys get sharps, flat keys flats.
+    expect(name(chord(3), 4, "major")).toBe("G♯m");
+    expect(name(chord(4), 1, "minor")).toBe("F♯m");
+    expect(name(chord(6), 1, "minor")).toBe("A");
+    expect(name(chord(7), 6, "major")).toBe("E♯dim");
+    expect(name(chord(2), 3, "major")).toBe("Fm");
+    // Borrowed chords keep their degree letter: ♭VI in E major is C, ♭III is G.
+    expect(name(chord(6, { borrowed: true }), 4, "major")).toBe("C");
+    expect(name(chord(3, { borrowed: true }), 4, "major")).toBe("G");
+    // The major V in a minor key is E with G♯, in A minor.
+    expect(name(chord(5, { borrowed: true }), 9, "minor")).toBe("E");
+    expect(analyzeChord({ ...chord(5), applied: 6 }, 0, "major").noteNames).toEqual(["E", "G♯", "B"]);
+  });
+
+  it("never shows double sharps or flats in chord names", () => {
+    const modes = ["major", "minor", "dorian", "mixolydian", "lydian", "phrygian"] as const;
+    const doubles: string[] = [];
+    for (let key = 0; key < 12; key++)
+      for (const mode of modes)
+        for (let degree = 1; degree <= 7; degree++)
+          for (const borrowed of [false, true])
+            for (const applied of [0, 2, 3, 4, 5, 6, 7]) {
+              const a = analyzeChord({ degree, type: "seventh", inv: 1, borrowed, applied }, key, mode);
+              if (/[𝄪𝄫]|♯♯|♭♭/u.test(a.name + a.noteNames.join(""))) doubles.push(a.name);
+            }
+    expect(doubles).toEqual([]);
+    // ♭VI in D♭ major is A, not B𝄫; vii°7/ii in C♯ minor starts on D, not C𝄪.
+    expect(analyzeChord(chord(6, { borrowed: true }), 1, "major").name).toBe("A");
+    expect(analyzeChord({ ...chord(7, { type: "seventh" }), applied: 2 }, 1, "minor").name).toBe("Ddim7");
+    expect(stepPitchName(6, 1, 11, "major")).toBe("B4"); // A♯ raised in B major is A𝄪 → B
+  });
+
+  it("spells slash bass notes and chord tones", () => {
+    const a = analyzeChord(chord(3, { inv: 1 }), 4, "major");
+    expect(a.name).toBe("G♯m/B");
+    const v7 = analyzeChord({ ...chord(5, { type: "seventh", inv: 1 }), applied: 6 }, 0, "major");
+    expect(v7.name).toBe("E7/G♯");
+    expect(v7.noteNames).toEqual(["G♯", "B", "D", "E"]);
+    const add9 = analyzeChord(chord(1, { type: "add9" }), 1, "minor");
+    expect(add9.noteNames).toEqual(["C♯", "E", "G♯", "D♯"]);
   });
 });

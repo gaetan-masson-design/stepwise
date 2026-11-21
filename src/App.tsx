@@ -1,23 +1,47 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { engine } from "./lib/audio";
 import { exampleSong, blankSong, totalBeats } from "./lib/song";
-import { degreeColor } from "./lib/colors";
 import { exportJson, exportMidi, loadSaved, readSongFile, saveSong } from "./lib/files";
 import { melodyMidi, type ChordSpec } from "./lib/theory";
+import { applyTheme, loadTheme, watchSystemTheme, type ThemeChoice } from "./lib/theme";
+import { isIOS, preferPlaybackAudio, unlockOnGesture } from "./lib/device";
 import { initState, reducer, selectedChord, selectedNote, type Action, type Brush } from "./state";
-import { Transport } from "./components/Transport";
-import { Timeline } from "./components/Timeline";
+import { TopBar } from "./components/TopBar";
+import { LoopView } from "./components/LoopView";
+import { MelodyEditor } from "./components/MelodyEditor";
 import { ChordPalette } from "./components/ChordPalette";
 import { MelodyPanel } from "./components/MelodyPanel";
-import { SoundPanel } from "./components/SoundPanel";
+import { ArpPanel, BassPanel, PadSound } from "./components/LayerPanels";
+import { SongSheet } from "./components/SongSheet";
+import { LayerDock } from "./components/LayerDock";
+import { Notice } from "./components/Notice";
+import { windowStart, type Layer } from "./lib/lanes";
+import { useMediaQuery } from "./hooks/useMediaQuery";
+import { shortcutIgnored, spacePressesButton } from "./lib/shortcuts";
 
-const beatWidthFor = (w: number) => (w < 560 ? 40 : 52);
+const SILENT_HINT_KEY = "stepwise:silent-hint-dismissed";
+const hintDismissed = () => {
+  try {
+    return localStorage.getItem(SILENT_HINT_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, undefined, () => initState(loadSaved() ?? exampleSong()));
   const [playing, setPlaying] = useState(false);
-  const [beatWidth, setBeatWidth] = useState(() => beatWidthFor(window.innerWidth));
   const [error, setError] = useState<string | null>(null);
+  const [layer, setLayerState] = useState<Layer>("pads");
+  const [dockOpen, setDockOpen] = useState(true);
+  // The melody editor: open or not, and the first bar it shows.
+  const [editorBar, setEditorBar] = useState<number | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const editorBars = useMediaQuery("(min-width: 480px)") ? 2 : 1;
+  const [songSheet, setSongSheet] = useState(false);
+  const [theme, setTheme] = useState<ThemeChoice>(loadTheme);
+  const themeRef = useRef(theme);
+  const [silentHint, setSilentHint] = useState(false);
   const { song } = state;
   const chord = selectedChord(state);
   // Playback settings survive Clear and Example (undo doesn't restore them).
@@ -31,6 +55,30 @@ export default function App() {
   }, [song]);
 
   useEffect(() => engine.setMix(song.mix), [song.mix]);
+
+  // Theme: apply the choice and follow the device while it's "system".
+  useEffect(() => {
+    themeRef.current = theme;
+    applyTheme(theme);
+  }, [theme]);
+  useEffect(() => watchSystemTheme(() => themeRef.current), []);
+
+  // Audio: unlock it on the first tap, and wake it when the app comes back from the background.
+  useEffect(() => {
+    preferPlaybackAudio();
+    const stop = unlockOnGesture(async () => {
+      const ok = await engine.unlock();
+      // iOS's silent switch mutes web audio on many versions; say so once, gently.
+      if (ok && isIOS() && !hintDismissed()) setSilentHint(true);
+      return ok;
+    });
+    const onVisible = () => document.visibilityState === "visible" && engine.resume();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
 
   // Edits during playback are heard on the next pass. Only fields that change what's
   // scheduled trigger a reload; title edits and mixer moves don't.
@@ -48,9 +96,6 @@ export default function App() {
       engine.stop();
       setPlaying(false);
     };
-    const onResize = () => setBeatWidth(beatWidthFor(window.innerWidth));
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
   }, []);
 
   const previewChord = useCallback((c: ChordSpec) => {
@@ -94,10 +139,23 @@ export default function App() {
     dispatch({ type: "replaceSong", song: next });
   };
 
+  /** Picking a layer shows its tools (unfolding the dock) and closes the melody editor if it's another layer. */
+  const setLayer = (l: Layer) => {
+    setLayerState(l);
+    setDockOpen(true);
+    if (l !== "melody") setEditorBar(null);
+  };
+  const openEditor = (bar: number) => {
+    setLayer("melody");
+    setEditorBar(windowStart(bar, editorBars, song.bars));
+  };
+
+  const update = (patch: Partial<typeof song>, record?: boolean) => dispatch({ type: "updateSong", patch, record });
+
   // Keyboard shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).matches("input, select, textarea")) return;
+      if (shortcutIgnored(e.target instanceof Element ? e.target : null, e.key, e.defaultPrevented)) return;
       const run = (a: Action) => { e.preventDefault(); dispatch(a); };
       const mod = e.metaKey || e.ctrlKey;
       const k = e.key.toLowerCase();
@@ -105,7 +163,15 @@ export default function App() {
       if (mod && k === "y") return run({ type: "redo" });
       if (mod && k === "d") return run({ type: "duplicate" });
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === " ") { e.preventDefault(); void togglePlay(); return; }
+      if (e.key === " ") {
+        e.preventDefault();
+        if (e.repeat) return; // holding Space shouldn't stutter play/stop
+        if (spacePressesButton(e.target instanceof Element ? e.target : null, e.key)) {
+          window.addEventListener("keyup", (up) => up.key === " " && up.preventDefault(), { once: true, capture: true });
+        }
+        void togglePlay();
+        return;
+      }
       if (/^[1-7]$/.test(e.key)) { e.preventDefault(); placeChord(Number(e.key)); return; }
       if (e.key === "Delete" || e.key === "Backspace") return run({ type: "deleteSelected" });
       if (e.key === "Escape") return run({ type: "deselect" });
@@ -124,95 +190,138 @@ export default function App() {
   }, [togglePlay, placeChord, previewStep, note, state.cursor]);
 
   return (
-    <div className="app">
-      <header>
-        <div className="brand">
-          <span className="steps" aria-hidden>
-            {[1, 2, 3, 4, 5].map((d, i) => <i key={d} style={{ height: 6 + i * 2.5, background: degreeColor(d) }} />)}
-          </span>
-          Stepwise
-        </div>
-        <input
-          id="title" aria-label="Song title" value={song.title}
-          onChange={(e) => dispatch({ type: "updateSong", patch: { title: e.target.value }, record: false })}
-        />
-        <div className="hint">
-          <kbd>1</kbd>–<kbd>7</kbd> add chord · <kbd>Space</kbd> play · click the grid to add notes · drag to move, drag the edge to resize · <kbd>⌘D</kbd> duplicate
-        </div>
-      </header>
-
-      <Transport
-        song={song}
-        playing={playing}
-        canUndo={state.past.length > 0}
-        canRedo={state.future.length > 0}
-        onPlay={() => void togglePlay()}
-        onUpdate={(patch, record) => dispatch({ type: "updateSong", patch, record })}
-        onBars={(bars) => dispatch({ type: "setBars", bars })}
-        onUndo={() => dispatch({ type: "undo" })}
-        onRedo={() => dispatch({ type: "redo" })}
-        onExample={() => replaceSong({ ...exampleSong(), ...playback })}
-        onClear={() => replaceSong(blankSong({ key: song.key, mode: song.mode, bpm: song.bpm, ...playback }))}
-        onExportMidi={() => exportMidi(song)}
-        onExportJson={() => exportJson(song)}
-        onImport={async (f) => {
-          try {
-            replaceSong(await readSongFile(f));
-            setError(null);
-          } catch (err) {
-            setError(err instanceof Error ? err.message : "Couldn't open that file.");
-          }
-        }}
-      />
-      {error && <div className="error" role="alert">{error}</div>}
-
-      <Timeline
-        song={song}
-        sel={state.sel}
-        cursor={state.cursor}
-        playhead={state.playhead}
-        playing={playing}
-        beatWidth={beatWidth}
-        onPlaceNote={(start, step) => {
-          if (start >= totalBeats(song)) return;
-          dispatch({ type: "placeNote", start, step });
-          previewStep(step);
-        }}
-        onSelect={(kind, id) => {
-          dispatch({ type: "select", kind, id });
-          if (kind === "chord") {
-            const c = song.chords.find((x) => x.id === id);
-            if (c) previewChord(c);
-          } else {
-            const n = song.notes.find((x) => x.id === id);
-            if (n) previewStep(n.step, n.acc);
-          }
-        }}
-        onDelete={() => dispatch({ type: "deleteSelected" })}
-        onSetCursor={(beat) => dispatch({ type: "setCursor", beat })}
-        onSetPlayhead={(beat) => void setPlayhead(beat)}
-        onPreviewStep={(s) => previewStep(s)}
-        onEdit={(kind, id, start, dur, step) => dispatch({ type: "editItem", kind, id, start, dur, step })}
-      />
-
-      <div className="dock">
-        <ChordPalette song={song} brush={state.brush} cursor={state.cursor} onPlace={placeChord} onBrush={setBrush} />
-        <div className="side">
-        <MelodyPanel
+    <>
+      {/* Phone-first shell: top bar, the loop in the middle, the tool dock at the bottom. */}
+      <div className="mx-auto flex h-dvh max-w-screen-2xl flex-col pt-(--safe-top) pr-(--safe-right) pl-(--safe-left)">
+        <TopBar
           song={song}
-          noteDur={state.noteDur}
-          chord={chord}
-          note={note}
-          onNoteDur={(dur) => dispatch({ type: "setNoteDur", dur })}
-          onAccidental={(acc) => {
-            dispatch({ type: "setAccidental", acc });
-            if (note) previewStep(note.step, acc);
+          playing={playing}
+          theme={theme}
+          onPlay={() => void togglePlay()}
+          onUpdate={update}
+          onSongSettings={() => setSongSheet(true)}
+          onTheme={setTheme}
+          onExample={() => replaceSong({ ...exampleSong(), ...playback })}
+          onClear={() => replaceSong(blankSong({ key: song.key, mode: song.mode, bpm: song.bpm, ...playback }))}
+          onExportMidi={() => exportMidi(song)}
+          onExportJson={() => exportJson(song)}
+          onImport={async (f) => {
+            try {
+              replaceSong(await readSongFile(f));
+              setError(null);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Couldn't open that file.");
+            }
           }}
-          onDelete={() => dispatch({ type: "deleteSelected" })}
         />
-        <SoundPanel song={song} onUpdate={(patch, record) => dispatch({ type: "updateSong", patch, record })} />
-        </div>
+
+        <main className="flex min-h-0 flex-1 flex-col gap-2 p-2 sm:p-3">
+          {error && <Notice tone="error" onClose={() => setError(null)}>{error}</Notice>}
+          {silentHint && (
+            <Notice onClose={() => {
+              setSilentHint(false);
+              try { localStorage.setItem(SILENT_HINT_KEY, "1"); } catch { /* storage blocked */ }
+            }}>
+              No sound? Check that the silent switch on the side of your phone is off, and turn the volume up.
+            </Notice>
+          )}
+          <div className="min-h-0 flex-1">
+            {editorBar === null ? (
+              <LoopView
+                song={song}
+                layer={layer}
+                sel={state.sel}
+                cursor={state.cursor}
+                playhead={state.playhead}
+                playing={playing}
+                onLayer={setLayer}
+                zoom={zoom}
+                onZoom={setZoom}
+                onOpenMelody={openEditor}
+                onSelectChord={(id) => {
+                  dispatch({ type: "select", kind: "chord", id });
+                  const c = song.chords.find((x) => x.id === id);
+                  if (c) previewChord(c);
+                }}
+                onDelete={() => dispatch({ type: "deleteSelected" })}
+                onSetCursor={(beat) => dispatch({ type: "setCursor", beat })}
+                onSetPlayhead={(beat) => void setPlayhead(beat)}
+                onEdit={(kind, id, start, dur) => dispatch({ type: "editItem", kind, id, start, dur })}
+              />
+            ) : (
+              <MelodyEditor
+                song={song}
+                sel={state.sel}
+                playhead={state.playhead}
+                playing={playing}
+                startBar={Math.min(editorBar, Math.max(0, song.bars - 1))}
+                windowBars={editorBars}
+                onStartBar={setEditorBar}
+                onClose={() => setEditorBar(null)}
+                onPlaceNote={(start, step) => {
+                  if (start >= totalBeats(song)) return;
+                  dispatch({ type: "placeNote", start, step });
+                  previewStep(step);
+                }}
+                onSelectNote={(id) => {
+                  dispatch({ type: "select", kind: "note", id });
+                  const n = song.notes.find((x) => x.id === id);
+                  if (n) previewStep(n.step, n.acc);
+                }}
+                onDelete={() => dispatch({ type: "deleteSelected" })}
+                onPreviewStep={(s) => previewStep(s)}
+                onEdit={(id, start, dur, step) => dispatch({ type: "editItem", kind: "note", id, start, dur, step })}
+              />
+            )}
+          </div>
+        </main>
+
+        <LayerDock
+          layer={layer}
+          open={dockOpen}
+          onOpenChange={setDockOpen}
+          canUndo={state.past.length > 0}
+          canRedo={state.future.length > 0}
+          hasSelection={!!(chord || note)}
+          onUndo={() => dispatch({ type: "undo" })}
+          onRedo={() => dispatch({ type: "redo" })}
+          onDelete={() => dispatch({ type: "deleteSelected" })}
+        >
+          {layer === "pads" && (
+            <ChordPalette song={song} brush={state.brush} cursor={state.cursor} onPlace={placeChord} onBrush={setBrush}>
+              <PadSound song={song} onUpdate={update} />
+            </ChordPalette>
+          )}
+          {layer === "arp" && <ArpPanel song={song} onUpdate={update} />}
+          {layer === "bass" && <BassPanel song={song} onUpdate={update} />}
+          {layer === "melody" && (
+            <MelodyPanel
+              song={song}
+              noteDur={state.noteDur}
+              chord={chord}
+              note={note}
+              onNoteDur={(dur) => dispatch({ type: "setNoteDur", dur })}
+              onAccidental={(acc) => {
+                dispatch({ type: "setAccidental", acc });
+                if (note) previewStep(note.step, acc);
+              }}
+              onDelete={() => dispatch({ type: "deleteSelected" })}
+              onDuplicate={() => dispatch({ type: "duplicate" })}
+              editorOpen={editorBar !== null}
+              onOpenEditor={() => openEditor(Math.floor(state.playhead / song.beatsPerBar))}
+              onLevel={(v) => update({ mix: { ...song.mix, melody: v } }, false)}
+            />
+          )}
+        </LayerDock>
+
+        <SongSheet
+          open={songSheet}
+          onOpenChange={setSongSheet}
+          song={song}
+          onTitle={(title) => update({ title }, false)}
+          onBars={(bars) => dispatch({ type: "setBars", bars })}
+        />
       </div>
-    </div>
+    </>
   );
 }
