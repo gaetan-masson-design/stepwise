@@ -19,9 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           # Vitest 5 needs Node ^22.12, ^24 or >=26; Vite 8 needs ^20.19 or >=22.12.
           node-version: 24
