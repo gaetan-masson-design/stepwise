@@ -1,3 +1,4 @@
+/** Default names for the 12 pitch classes, used only where no key context exists. */
 export const NOTE_NAMES = ["C", "D♭", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
 
 export const MODES = {
@@ -66,6 +67,57 @@ export const mod = (n: number, m: number) => ((n % m) + m) % m;
 export const stepToSemitone = (scale: readonly number[], step: number) =>
   scale[mod(step, 7)] + 12 * Math.floor(step / 7);
 
+// --- Spelling -------------------------------------------------------------
+// Names come from a letter (C D E F G A B = 0..6) plus however many sharps or flats
+// reach the pitch. Each scale degree gets its own letter, so a raised 5th in C is G♯, not A♭.
+
+const LETTERS = ["C", "D", "E", "F", "G", "A", "B"];
+const LETTER_PC = [0, 2, 4, 5, 7, 9, 11];
+
+/** Accidental (in semitones, -2..2) that turns `letter` into pitch class `pc`. */
+const accidentalFor = (letter: number, pc: number) => mod(pc - LETTER_PC[mod(letter, 7)] + 6, 12) - 6;
+
+const accidentalText = (n: number) =>
+  n === 0 ? "" : n === 2 ? "𝄪" : n === -2 ? "𝄫" : n > 0 ? "♯".repeat(n) : "♭".repeat(-n);
+
+/** Name of pitch class `pc` (absolute, C = 0) written on `letter`. */
+export const spell = (letter: number, pc: number) => LETTERS[mod(letter, 7)] + accidentalText(accidentalFor(letter, pc));
+
+/**
+ * The letter of the tonic for a key (0..11, C = 0) in a mode: the spelling whose scale needs
+ * the fewest sharps and flats (C♯ minor rather than D♭ minor). Ties go to the usual flat names.
+ */
+export function tonicLetter(key: number, mode: Mode): number {
+  const scale = MODES[mode];
+  let best = -1, bestCost = Infinity;
+  for (let letter = 0; letter < 7; letter++) {
+    const acc = accidentalFor(letter, key);
+    if (Math.abs(acc) > 1) continue;
+    const accs = scale.map((s, i) => accidentalFor(letter + i, key + s));
+    if (accs.some((a) => Math.abs(a) > 1)) continue;
+    // Mixed sharps and flats in one scale count extra.
+    const mixed = accs.some((a) => a > 0) && accs.some((a) => a < 0) ? 7 : 0;
+    const cost = accs.reduce((n, a) => n + Math.abs(a), 0) + mixed + (spell(letter, key) === NOTE_NAMES[mod(key, 12)] ? -0.5 : 0);
+    if (cost < bestCost) [best, bestCost] = [letter, cost];
+  }
+  return best < 0 ? LETTERS.indexOf(NOTE_NAMES[mod(key, 12)][0]) : best;
+}
+
+/** The tonic's name, e.g. "C♯" for key 1 in minor, "D♭" in major. */
+export const keyName = (key: number, mode: Mode) => spell(tonicLetter(key, mode), key);
+
+/** Name of a melody step (diatonic steps from the tonic) with an accidental, in a key. */
+export const stepName = (step: number, acc: number, key: number, mode: Mode) =>
+  spell(tonicLetter(key, mode) + step, key + stepToSemitone(MODES[mode], step) + acc);
+
+/** Scientific pitch name, e.g. "G♯4" or "C♭5": the octave follows the letter, not the key on a piano. */
+export function stepPitchName(step: number, acc: number, key: number, mode: Mode) {
+  const midi = melodyMidi(step, acc, key, mode);
+  const letter = tonicLetter(key, mode) + step;
+  const natural = midi - accidentalFor(letter, midi);
+  return spell(letter, midi) + (Math.floor(natural / 12) - 1);
+}
+
 export const maxInversion = (type: ChordType) => (type === "seventh" ? 3 : 2);
 
 export interface ChordSpec {
@@ -84,8 +136,10 @@ export interface ChordAnalysis {
   sup: string;
   /** Applied target, e.g. "/V". Empty for ordinary chords. */
   target: string;
-  /** Lead-sheet name, e.g. "G7/B". */
+  /** Lead-sheet name, e.g. "G7/B", spelled for the key ("G♯dim7", not "A♭dim7", for vii°7/vi in C). */
   name: string;
+  /** Chord tone names, lowest voiced first. */
+  noteNames: string[];
   /** Voiced chord tones in semitones above the tonic, lowest first. */
   voiced: number[];
   /** Pitch classes (relative to tonic) of the chord. */
@@ -125,10 +179,20 @@ export function analyzeChord(c: ChordSpec, key: number, mode: Mode): ChordAnalys
   const shift = offset + local >= 12 ? offset - 12 : offset;
   const root = local + shift;
 
-  const tones = CHORD_TYPES[c.type].map((s) => stepToSemitone(scale, d + s) + shift).sort((a, b) => a - b);
+  // Letters: the chord root sits on its scale degree's letter (counted from the target's root for
+  // applied chords), and each chord tone on the letter its scale step lands on.
+  const rootLetter = tonicLetter(key, mode) + (applied ? applied - 1 : 0) + d;
+  const built = CHORD_TYPES[c.type]
+    .map((s) => ({ semi: stepToSemitone(scale, d + s) + shift, letter: rootLetter + s }))
+    .sort((a, b) => a.semi - b.semi);
+  const tones = built.map((t) => t.semi);
   const inv = Math.min(c.inv, maxInversion(c.type));
-  const voiced = tones.slice();
-  for (let i = 0; i < inv; i++) voiced.push(voiced.shift()! + 12);
+  const voicedTones = built.slice();
+  for (let i = 0; i < inv; i++) {
+    const t = voicedTones.shift()!;
+    voicedTones.push({ ...t, semi: t.semi + 12 });
+  }
+  const voiced = voicedTones.map((t) => t.semi);
 
   const diff = applied ? 0 : mod(root - MODES[mode][d] + 6, 12) - 6;
   const accidental = diff < 0 ? "♭".repeat(-diff) : "♯".repeat(diff);
@@ -139,7 +203,7 @@ export function analyzeChord(c: ChordSpec, key: number, mode: Mode): ChordAnalys
   const qualityName = { maj: "", min: "m", dim: "dim", aug: "+" }[quality];
   const triadFig = ["", "6", "6/4"][inv];
 
-  let name = NOTE_NAMES[mod(root + key, 12)];
+  let name = spell(rootLetter, root + key);
   let sup = "";
   switch (c.type) {
     case "triad":
@@ -166,7 +230,7 @@ export function analyzeChord(c: ChordSpec, key: number, mode: Mode): ChordAnalys
       name += qualityName + "add9";
       break;
   }
-  if (inv > 0) name += "/" + NOTE_NAMES[mod(voiced[0] + key, 12)];
+  if (inv > 0) name += "/" + spell(voicedTones[0].letter, voicedTones[0].semi + key);
 
   const target = applied
     ? "/" + analyzeChord({ degree: applied, type: "triad", inv: 0, borrowed: c.borrowed }, key, mode).numeral
@@ -178,6 +242,7 @@ export function analyzeChord(c: ChordSpec, key: number, mode: Mode): ChordAnalys
     target,
     name,
     voiced,
+    noteNames: voicedTones.map((t) => spell(t.letter, t.semi + key)),
     pitchClasses: new Set(tones.map((t) => mod(t, 12))),
   };
 }
