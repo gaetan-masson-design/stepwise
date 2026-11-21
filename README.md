@@ -19,7 +19,10 @@ npm run preview  # serve the production build
 3. Open that address on your phone. Tap anywhere once to wake up the sound.
 4. On an iPhone, if you hear nothing, check the silent switch on the side and the volume. The app shows this hint once.
 
-To install it like an app, open the production build (`npm run build && npm run preview -- --host`) and use your browser's "Add to Home Screen". It then opens full screen and works offline. (The service worker only runs in the production build.)
+`dev:host` uses plain http, which is fine for checking layout and sound on a phone. Installing the app and offline mode need a secure page, though, and phones don't treat `http://192.168…` as one:
+
+- **On your computer:** run `npm run build && npm run preview`, then open `http://localhost:4173`. Localhost counts as secure, so the browser offers to install the app and it keeps working offline. (The service worker only runs in the production build.)
+- **On a phone:** installing ("Add to Home Screen" as a full-screen app that works offline) needs a trusted `https://` address, such as a hosted preview. A self-signed certificate isn't enough, because browsers won't register the service worker on one.
 
 ## Using it
 
