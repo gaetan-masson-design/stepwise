@@ -42,7 +42,7 @@
   --destructive: oklch(0.58 0.21 27);
   --ring: var(--primary);
 
-  /* Timeline */
+  /* Loop view and melody editor */
   --playhead: oklch(0.7 0.15 60);
   --cursor: var(--primary);
   --warning: var(--playhead);
@@ -239,7 +239,7 @@
 }
 
 /*
- * Timeline grids. The component sets --bw (one beat), --bar (one bar) and --rh (one melody row)
+ * Lane and melody-editor grids. The components set --bw (one beat), --bar (one bar) and --rh (one melody row)
  * from its geometry; lines use the border tokens.
  */
 @utility grid-beats {

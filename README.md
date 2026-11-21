@@ -26,15 +26,21 @@ npm run preview  # serve the production build
 
 ## Using it
 
-The screen has three parts: the top bar (play, key, tempo and a menu), the loop in the middle, and a dock at the bottom with the selected tool (Chords, Melody or Sound) plus undo and redo. Tapping a chord or a note opens the matching tool.
+The screen has three parts:
+- **Top bar:** play, key, tempo and a menu.
+- **The loop:** four stacked lanes covering the whole loop: **Pads** (the chords), **Arp**, **Bass** and **Melody**. The whole loop fits the screen; the zoom button (1×, 2×, 4×) in the corner stretches it for detail.
+- **The dock:** the tools for whichever lane you tapped. Tap its header to fold it away. Delete, undo and redo are always there.
+
+Tap the Melody lane to open the melody editor at that bar: one or two bars at a time, with rows big enough for a finger. **Done** goes back to the loop.
 
 - **1–7** add a chord at the cursor. Type, inversion, length and "Borrowed" (take the chord from the parallel key) apply to the next chord, or to the selected one.
 - **Applied** turns the palette into secondary chords (V/V, vii°7/vi, …) aimed at the chosen degree; the next chord after one suggests its target.
 - **Drag** a note or chord to move it; drag its right edge to resize. **Ctrl/Cmd+D** duplicates the selection.
-- **Sound** sets how chords play (block, pulse, arpeggio; MIDI export matches) and the chords/bass/melody levels.
-- **Click the grid** to add a melody note. Click a note or chord to select it; **Delete** or double-click removes it; **arrow keys** move a selected note.
+- **Pads** also sets how the chords play (block, pulse, arpeggio; MIDI export matches). Each layer has its own level.
+- **Arp** and **Bass** follow the chords. For now the Arp lane previews the arpeggio, and the Bass lane shows what the bass plays; their own patterns come next.
+- In the melody editor, **tap the grid** to add a note. Click a note or chord to select it; **Delete** or double-click removes it; **arrow keys** move a selected note.
 - **Space** plays/stops. Click the bar numbers to set where playback starts.
-- The **menu** (⋮) has song settings (title, loop length), export, save/open, the example and the theme.
+- The **menu** (⋮) has song settings (title, loop length), loop and click on/off, export, save/open, the example and the theme.
 - **Ctrl/Cmd+Z** undoes, **Shift+Ctrl/Cmd+Z** (or Ctrl/Cmd+Y) redoes. Songs autosave to the browser; **Save file / Open file** use `.stepwise.json`; **Export MIDI** writes chords, bass and melody as separate tracks.
 
 ## Code map
@@ -50,5 +56,6 @@ The screen has three parts: the top bar (play, key, tempo and a menu), the loop 
 | `src/state.ts` | Editor reducer with undo history |
 | `src/lib/device.ts`, `src/lib/theme.ts` | iOS audio helpers; light/dark theme |
 | `src/styles.css` | Design tokens (colour, type, spacing, radius, motion) and Tailwind setup |
-| `src/components/` | Top bar, timeline, tool dock, chord palette, melody and sound panels, song sheet |
+| `src/lib/lanes.ts` | The four layers, fitting the loop to the screen, what the Arp and Bass lanes draw |
+| `src/components/` | Top bar, loop view (four lanes), melody editor, layer dock and panels, chord palette, song sheet |
 | `src/components/ui/` | shadcn/ui primitives adapted to the tokens |

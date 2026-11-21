@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup,
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup,
   DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
@@ -111,6 +111,12 @@ export function TopBar(p: Props) {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
           <DropdownMenuItem onSelect={p.onSongSettings}><Settings2 /> Song settings…</DropdownMenuItem>
+          <DropdownMenuCheckboxItem checked={song.loop} onCheckedChange={(loop) => p.onUpdate({ loop }, false)} onSelect={(e) => e.preventDefault()}>
+            Loop playback
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem checked={song.metronome} onCheckedChange={(metronome) => p.onUpdate({ metronome }, false)} onSelect={(e) => e.preventDefault()}>
+            Click track
+          </DropdownMenuCheckboxItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={p.onExportMidi}><Music /> Export MIDI</DropdownMenuItem>
           <DropdownMenuItem onSelect={p.onExportJson}><Download /> Save file</DropdownMenuItem>

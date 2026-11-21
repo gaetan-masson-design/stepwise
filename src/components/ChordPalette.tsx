@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { analyzeChord, canTonicize, CHORD_TYPE_LABEL, CHORD_TYPES, keyName, LIKELY_NEXT, maxInversion, MODE_LABEL, PARALLEL, type ChordType } from "../lib/theory";
 import { degreeColor } from "../lib/colors";
 import type { Song } from "../lib/song";
@@ -15,13 +16,15 @@ interface Props {
   cursor: number;
   onPlace: (degree: number) => void;
   onBrush: (patch: Partial<Brush>) => void;
+  /** Extra controls under the palette (how the pads play, level). */
+  children?: ReactNode;
 }
 
 const TYPE_OPTS = (Object.keys(CHORD_TYPES) as ChordType[]).map((t) => [t, CHORD_TYPE_LABEL[t]] as const);
 const INV_OPTS = [[0, "Root"], [1, "1st"], [2, "2nd"], [3, "3rd"]] as const;
 const DUR_OPTS = [[1, "1 beat"], [2, "2 beats"], [4, "4 beats"], [8, "2 bars"]] as const;
 
-export function ChordPalette({ song, brush, cursor, onPlace, onBrush }: Props) {
+export function ChordPalette({ song, brush, cursor, onPlace, onBrush, children }: Props) {
   const prev = song.chords.filter((c) => c.start < cursor).at(-1);
   // An applied chord wants to resolve to its target.
   const likely = !prev || brush.applied ? [] : prev.applied ? [prev.applied] : prev.borrowed ? [] : LIKELY_NEXT[prev.degree];
@@ -33,10 +36,11 @@ export function ChordPalette({ song, brush, cursor, onPlace, onBrush }: Props) {
     [t, "/" + analyzeChord({ degree: t, type: "triad", inv: 0, borrowed: brush.borrowed }, song.key, song.mode).numeral] as const)];
 
   return (
-    <Panel
-      title="Chords"
-      aside={<>{keyName(song.key, song.mode)} {MODE_LABEL[song.mode].toLowerCase()} · borrowed from {MODE_LABEL[PARALLEL[song.mode]].toLowerCase()}</>}
-    >
+    <Panel label="Pads">
+      <p className="text-sm text-muted-foreground">
+        Tap a chord to add it at the cursor in the Pads lane.{" "}
+        <span className="whitespace-nowrap">{keyName(song.key, song.mode)} {MODE_LABEL[song.mode].toLowerCase()} · borrowed from {MODE_LABEL[PARALLEL[song.mode]].toLowerCase()}</span>
+      </p>
       <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
         {[1, 2, 3, 4, 5, 6, 7].map((d) => {
           const a = analyzeChord({ degree: d, ...brush }, song.key, song.mode);
@@ -56,7 +60,7 @@ export function ChordPalette({ song, brush, cursor, onPlace, onBrush }: Props) {
               <RomanNumeral a={a} className="text-xl sm:text-2xl" />
               <span className="font-mono text-xs font-semibold whitespace-nowrap opacity-85">{a.name}</span>
               {next && (
-                <span className="absolute top-1.5 right-1.5 rounded-xs bg-deg-ink px-1.5 py-px text-2xs font-bold text-surface" aria-hidden>
+                <span className="absolute right-1.5 bottom-1.5 rounded-full bg-surface px-2 py-0.5 text-xs font-bold text-foreground shadow-sm" aria-hidden>
                   next
                 </span>
               )}
@@ -84,6 +88,7 @@ export function ChordPalette({ song, brush, cursor, onPlace, onBrush }: Props) {
           </Toggle>
         </div>
       </div>
+      {children}
     </Panel>
   );
 }

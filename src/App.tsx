@@ -7,13 +7,16 @@ import { applyTheme, loadTheme, watchSystemTheme, type ThemeChoice } from "./lib
 import { isIOS, preferPlaybackAudio, unlockOnGesture } from "./lib/device";
 import { initState, reducer, selectedChord, selectedNote, type Action, type Brush } from "./state";
 import { TopBar } from "./components/TopBar";
-import { Timeline } from "./components/Timeline";
+import { LoopView } from "./components/LoopView";
+import { MelodyEditor } from "./components/MelodyEditor";
 import { ChordPalette } from "./components/ChordPalette";
 import { MelodyPanel } from "./components/MelodyPanel";
-import { SoundPanel } from "./components/SoundPanel";
+import { ArpPanel, BassPanel, PadSound } from "./components/LayerPanels";
 import { SongSheet } from "./components/SongSheet";
-import { ToolDock, type Tool } from "./components/ToolDock";
+import { LayerDock } from "./components/LayerDock";
 import { Notice } from "./components/Notice";
+import { windowStart, type Layer } from "./lib/lanes";
+import { useMediaQuery } from "./hooks/useMediaQuery";
 
 const SILENT_HINT_KEY = "stepwise:silent-hint-dismissed";
 const hintDismissed = () => {
@@ -28,7 +31,11 @@ export default function App() {
   const [state, dispatch] = useReducer(reducer, undefined, () => initState(loadSaved() ?? exampleSong()));
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tool, setTool] = useState<Tool>("chords");
+  const [layer, setLayerState] = useState<Layer>("pads");
+  const [dockOpen, setDockOpen] = useState(true);
+  // The melody editor: open or not, and the first bar it shows.
+  const [editorBar, setEditorBar] = useState<number | null>(null);
+  const editorBars = useMediaQuery("(min-width: 480px)") ? 2 : 1;
   const [songSheet, setSongSheet] = useState(false);
   const [theme, setTheme] = useState<ThemeChoice>(loadTheme);
   const themeRef = useRef(theme);
@@ -130,6 +137,17 @@ export default function App() {
     dispatch({ type: "replaceSong", song: next });
   };
 
+  /** Picking a layer shows its tools (unfolding the dock) and closes the melody editor if it's another layer. */
+  const setLayer = (l: Layer) => {
+    setLayerState(l);
+    setDockOpen(true);
+    if (l !== "melody") setEditorBar(null);
+  };
+  const openEditor = (bar: number) => {
+    setLayer("melody");
+    setEditorBar(windowStart(bar, editorBars, song.bars));
+  };
+
   const update = (patch: Partial<typeof song>, record?: boolean) => dispatch({ type: "updateSong", patch, record });
 
   // Keyboard shortcuts.
@@ -199,42 +217,58 @@ export default function App() {
             </Notice>
           )}
           <div className="min-h-0 flex-1">
-            <Timeline
-              song={song}
-              sel={state.sel}
-              cursor={state.cursor}
-              playhead={state.playhead}
-              playing={playing}
-              onPlaceNote={(start, step) => {
-                if (start >= totalBeats(song)) return;
-                dispatch({ type: "placeNote", start, step });
-                previewStep(step);
-                setTool("melody");
-              }}
-              onSelect={(kind, id) => {
-                dispatch({ type: "select", kind, id });
-                if (kind === "chord") {
+            {editorBar === null ? (
+              <LoopView
+                song={song}
+                layer={layer}
+                sel={state.sel}
+                cursor={state.cursor}
+                playhead={state.playhead}
+                playing={playing}
+                onLayer={setLayer}
+                onOpenMelody={openEditor}
+                onSelectChord={(id) => {
+                  dispatch({ type: "select", kind: "chord", id });
                   const c = song.chords.find((x) => x.id === id);
                   if (c) previewChord(c);
-                  setTool("chords");
-                } else {
+                }}
+                onDelete={() => dispatch({ type: "deleteSelected" })}
+                onSetCursor={(beat) => dispatch({ type: "setCursor", beat })}
+                onSetPlayhead={(beat) => void setPlayhead(beat)}
+                onEdit={(kind, id, start, dur) => dispatch({ type: "editItem", kind, id, start, dur })}
+              />
+            ) : (
+              <MelodyEditor
+                song={song}
+                sel={state.sel}
+                playhead={state.playhead}
+                playing={playing}
+                startBar={Math.min(editorBar, Math.max(0, song.bars - 1))}
+                windowBars={editorBars}
+                onStartBar={setEditorBar}
+                onClose={() => setEditorBar(null)}
+                onPlaceNote={(start, step) => {
+                  if (start >= totalBeats(song)) return;
+                  dispatch({ type: "placeNote", start, step });
+                  previewStep(step);
+                }}
+                onSelectNote={(id) => {
+                  dispatch({ type: "select", kind: "note", id });
                   const n = song.notes.find((x) => x.id === id);
                   if (n) previewStep(n.step, n.acc);
-                  setTool("melody");
-                }
-              }}
-              onDelete={() => dispatch({ type: "deleteSelected" })}
-              onSetCursor={(beat) => { dispatch({ type: "setCursor", beat }); setTool("chords"); }}
-              onSetPlayhead={(beat) => void setPlayhead(beat)}
-              onPreviewStep={(s) => previewStep(s)}
-              onEdit={(kind, id, start, dur, step) => dispatch({ type: "editItem", kind, id, start, dur, step })}
-            />
+                }}
+                onDelete={() => dispatch({ type: "deleteSelected" })}
+                onPreviewStep={(s) => previewStep(s)}
+                onEdit={(id, start, dur, step) => dispatch({ type: "editItem", kind: "note", id, start, dur, step })}
+              />
+            )}
           </div>
         </main>
 
-        <ToolDock
-          tool={tool}
-          onTool={setTool}
+        <LayerDock
+          layer={layer}
+          open={dockOpen}
+          onOpenChange={setDockOpen}
           canUndo={state.past.length > 0}
           canRedo={state.future.length > 0}
           hasSelection={!!(chord || note)}
@@ -242,8 +276,14 @@ export default function App() {
           onRedo={() => dispatch({ type: "redo" })}
           onDelete={() => dispatch({ type: "deleteSelected" })}
         >
-          {tool === "chords" && <ChordPalette song={song} brush={state.brush} cursor={state.cursor} onPlace={placeChord} onBrush={setBrush} />}
-          {tool === "melody" && (
+          {layer === "pads" && (
+            <ChordPalette song={song} brush={state.brush} cursor={state.cursor} onPlace={placeChord} onBrush={setBrush}>
+              <PadSound song={song} onUpdate={update} />
+            </ChordPalette>
+          )}
+          {layer === "arp" && <ArpPanel song={song} onUpdate={update} />}
+          {layer === "bass" && <BassPanel song={song} onUpdate={update} />}
+          {layer === "melody" && (
             <MelodyPanel
               song={song}
               noteDur={state.noteDur}
@@ -256,10 +296,12 @@ export default function App() {
               }}
               onDelete={() => dispatch({ type: "deleteSelected" })}
               onDuplicate={() => dispatch({ type: "duplicate" })}
+              editorOpen={editorBar !== null}
+              onOpenEditor={() => openEditor(Math.floor(state.playhead / song.beatsPerBar))}
+              onLevel={(v) => update({ mix: { ...song.mix, melody: v } }, false)}
             />
           )}
-          {tool === "sound" && <SoundPanel song={song} onUpdate={update} />}
-        </ToolDock>
+        </LayerDock>
 
         <SongSheet
           open={songSheet}

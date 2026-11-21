@@ -26,8 +26,15 @@ A drummer and percussionist with little theory who plays a bit of piano and hand
 - **Tokens live in `src/styles.css`**: colour (light on `:root`, dark on `[data-theme="dark"]`), the seven scale-degree colours (`--deg-1`…`--deg-7`, used as `bg-deg-3` or via `degreeColor()`), type scale (`text-2xs`…`text-2xl`, `text-figure` for numeral superscripts), spacing (Tailwind's 4px step plus `touch` = 44px), radius (`rounded-xs`…`rounded-xl`), motion (`--duration-fast/base/slow`, zeroed for reduced motion) and safe-area insets (`--safe-top` etc).
 - **Use tokens for every colour, size, radius and timing.** No hex, rgb or oklch values, and no arbitrary `[12px]` values in components. If something is missing, add a token.
 - **Primitives:** shadcn/ui components are in `src/components/ui/` (button, toggle, toggle group, slider, select, sheet, dropdown menu, input). Add more with `npx shadcn@latest add <name>`, then check the import of `cn` points at `@/lib/utils` and swap any `white`/`black` for tokens. They're ours to edit: on touch screens controls are 44px (`h-touch`), with a compact `pointer-fine:` size for mouse users.
-- **Music parts are our own components** on the same tokens: `ChordTile`, `Timeline`, `RomanNumeral`. Timeline geometry (row height, beat width bounds) is the `TIMELINE` constant in `Timeline.tsx`, because the drag maths needs it in JS.
-- **Layout shell (phone first):** `TopBar` (play, key, tempo, menu) → `Timeline` (the loop, fits the width; ruler and chord lane stick to the top) → `ToolDock` (the selected tool's panel, then the tool switcher, undo and redo within thumb reach). `SongSheet` holds title and loop length. Phase 1's layers slot in as lanes in the timeline and tools in the dock.
+- **Music parts are our own components** on the same tokens: `ChordTile`, `LoopView`, `MelodyEditor`, `RomanNumeral`. Beat width and row height are computed in JS (the drag maths needs them); lane heights use spacing classes.
+- **Layout shell (phone first):**
+  - `TopBar`: play, key, tempo, and a menu (song settings, loop/click, files, theme).
+  - `LoopView`: the loop as four stacked lanes (Pads, Arp, Bass, Melody). At 1× the whole loop fits the width with no sideways scroll; the zoom button (1×/2×/4×) stretches it and the lanes scroll inside the view. Tapping a lane picks that layer.
+  - `MelodyEditor`: replaces the loop view while open. It shows the Melody lane zoomed to 1 bar on phones (2 with more room), with 44px rows on touch screens.
+  - `LayerDock`: the picked layer's tools, foldable from its header, with delete/undo/redo always in reach.
+  - `SongSheet`: title and loop length.
+- **Layers** are listed in `src/lib/lanes.ts` (`Layer`, plus what the Arp and Bass lanes draw). Phase 1 gives Arp and Bass their own sounds and patterns; for now Arp previews the arpeggio from the chords and Bass draws what plays.
+- **Touch targets:** anything tapped on a phone is at least 44px (`h-touch`, `size-touch`, `min-h-touch`).
 - Theme: `src/lib/theme.ts` sets `data-theme` on `<html>`; `index.html` does it before first paint.
 
 ## Commands
@@ -53,7 +60,9 @@ npm run icons         # redraws the app icons in public/
 | `src/lib/midi.ts` | Standard MIDI File export |
 | `src/lib/files.ts` | Downloads, file import, localStorage |
 | `src/state.ts` | Editor reducer with undo/redo |
-| `src/components/` | UI: top bar, timeline, tool dock, chord palette, melody and sound panels, song sheet |
+| `src/lib/lanes.ts` | Layers, fitting the loop to the width, zoom steps, what the Arp/Bass lanes draw |
+| `src/hooks/useItemDrag.ts` | Drag to move or resize chords and notes |
+| `src/components/` | UI: top bar, loop view (four lanes), melody editor, layer dock and panels, chord palette, song sheet |
 | `src/components/ui/` | shadcn/ui primitives, adapted to our tokens |
 
 ## Rules
